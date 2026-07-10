@@ -6,24 +6,34 @@ import {
   FileText,
   Wrench,
   Building2,
+  LogOut,
 } from 'lucide-react';
 import type { Page } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 
 interface SidebarProps {
   currentPage: Page;
   onNavigate: (page: Page) => void;
 }
 
-const navItems: { id: Page; label: string; icon: React.ReactNode; description: string }[] = [
-  { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Xem nhanh hoạt động' },
-  { id: 'rooms', label: 'Phòng trọ', icon: <DoorOpen className="w-[18px] h-[18px]" />, description: 'Quản lý phòng' },
-  { id: 'tenants', label: 'Người thuê', icon: <Users className="w-[18px] h-[18px]" />, description: 'Thông tin thuê' },
-  { id: 'meter-readings', label: 'Điện nước', icon: <Zap className="w-[18px] h-[18px]" />, description: 'Chỉ số tiêu thụ' },
-  { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
-  { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
-];
-
 export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+  const { user, logout } = useAuth();
+  
+  const navItems: { id: Page; label: string; icon: React.ReactNode; description: string }[] = user?.role === 'TENANT' 
+    ? [
+        { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Thông tin thuê' },
+        { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
+        { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
+      ]
+    : [
+        { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Xem nhanh hoạt động' },
+        { id: 'rooms', label: 'Phòng trọ', icon: <DoorOpen className="w-[18px] h-[18px]" />, description: 'Quản lý phòng' },
+        { id: 'tenants', label: 'Người thuê', icon: <Users className="w-[18px] h-[18px]" />, description: 'Thông tin thuê' },
+        { id: 'meter-readings', label: 'Điện nước', icon: <Zap className="w-[18px] h-[18px]" />, description: 'Chỉ số tiêu thụ' },
+        { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
+        { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
+      ];
+
   return (
     <aside className="w-72 bg-white border-r border-charcoal-100/50 fixed h-screen flex flex-col">
       {/* Brand Section */}
@@ -74,11 +84,25 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       </nav>
 
       {/* Footer */}
-      <div className="px-7 py-5 border-t border-charcoal-100/50 bg-cream-50/50">
-        <p className="text-xs text-charcoal-400 text-center leading-relaxed">
-          Phiên bản 1.0.0<br />
-          <span className="text-charcoal-300">Phần mềm quản lý phòng trọ</span>
-        </p>
+      <div className="px-7 py-5 border-t border-charcoal-100/50 bg-cream-50/50 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-terra-100 flex items-center justify-center">
+            <span className="text-terra-700 font-bold text-sm">
+              {user?.username?.[0]?.toUpperCase() || 'A'}
+            </span>
+          </div>
+          <div className="text-sm">
+            <p className="font-medium text-charcoal-900 leading-none">{user?.username}</p>
+            <p className="text-xs text-charcoal-500 mt-1">{user?.role}</p>
+          </div>
+        </div>
+        <button
+          onClick={logout}
+          className="p-2 text-charcoal-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+          title="Đăng xuất"
+        >
+          <LogOut className="w-5 h-5" />
+        </button>
       </div>
     </aside>
   );

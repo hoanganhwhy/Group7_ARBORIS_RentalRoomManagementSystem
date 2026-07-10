@@ -1,3 +1,10 @@
+export interface User {
+  id: string;
+  username: string;
+  role: 'LANDLORD' | 'TENANT';
+  tenant_id: string | null;
+}
+
 export interface Room {
   id: string;
   area: string;

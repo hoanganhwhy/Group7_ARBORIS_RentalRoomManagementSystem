@@ -1,20 +1,32 @@
 import { useState } from 'react';
 import { Sidebar } from './components/ui/Sidebar';
 import { Dashboard } from './pages/Dashboard';
+import { TenantDashboard } from './pages/TenantDashboard';
 import { Rooms } from './pages/Rooms';
 import { Tenants } from './pages/Tenants';
 import { MeterReadings } from './pages/MeterReadings';
 import { Invoices } from './pages/Invoices';
 import { Repairs } from './pages/Repairs';
+import { Login } from './pages/Login';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import type { Page } from './types';
 
-function App() {
+function AppContent() {
+  const { user, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center bg-cream-50"><div className="w-8 h-8 border-4 border-terra-500 border-t-transparent rounded-full animate-spin"></div></div>;
+  }
+
+  if (!user) {
+    return <Login />;
+  }
 
   const renderPage = () => {
     switch (currentPage) {
       case 'dashboard':
-        return <Dashboard onNavigate={setCurrentPage} />;
+        return user?.role === 'TENANT' ? <TenantDashboard /> : <Dashboard onNavigate={setCurrentPage} />;
       case 'rooms':
         return <Rooms />;
       case 'tenants':
@@ -26,7 +38,7 @@ function App() {
       case 'repairs':
         return <Repairs />;
       default:
-        <Dashboard onNavigate={setCurrentPage} />
+        return <Dashboard onNavigate={setCurrentPage} />;
     }
   };
 
@@ -103,6 +115,14 @@ function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 

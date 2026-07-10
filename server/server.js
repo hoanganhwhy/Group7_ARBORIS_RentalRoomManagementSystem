@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { query, queryOne, run } from './db.js';
 
 const app = express();
@@ -8,6 +10,47 @@ const port = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
+
+const JWT_SECRET = process.env.JWT_SECRET || 'hostelmate-super-secret-key-2024';
+
+export const authenticate = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'No token provided' });
+  const token = authHeader.split(' ')[1];
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload;
+    next();
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    const user = await queryOne('SELECT * FROM users WHERE username = ?', [username]);
+    if (!user) return res.status(401).json({ error: 'Sai tài khoản hoặc mật khẩu' });
+    
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Sai tài khoản hoặc mật khẩu' });
+    
+    const token = jwt.sign({ id: user.id, role: user.role, tenant_id: user.tenant_id }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user.id, username: user.username, role: user.role, tenant_id: user.tenant_id } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/auth/me', authenticate, async (req, res) => {
+  try {
+    const user = await queryOne('SELECT id, username, role, tenant_id FROM users WHERE id = ?', [req.user.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ user });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Helper function to generate UUID
 const generateId = () => crypto.randomUUID();
