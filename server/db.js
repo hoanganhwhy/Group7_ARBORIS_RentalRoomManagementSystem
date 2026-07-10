@@ -83,7 +83,8 @@ function initDatabase() {
     db.run(`
       CREATE TABLE IF NOT EXISTS phong (
         id TEXT PRIMARY KEY,
-        so_phong TEXT NOT NULL UNIQUE,
+        khu_vuc TEXT NOT NULL DEFAULT 'Khu A',
+        so_phong TEXT NOT NULL,
         tang INTEGER NOT NULL DEFAULT 1,
         dien_tich REAL NOT NULL DEFAULT 0 CHECK (dien_tich > 0),
         gia_phong REAL NOT NULL DEFAULT 0 CHECK (gia_phong > 0),
@@ -91,9 +92,45 @@ function initDatabase() {
         mo_ta TEXT,
         so_nguoi_toi_da INTEGER NOT NULL DEFAULT 2 CHECK (so_nguoi_toi_da > 0),
         ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP,
-        ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP
+        ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(khu_vuc, so_phong)
       )
-    `);
+    `, () => {
+      // Migration for khu_vuc column
+      db.all("PRAGMA table_info(phong)", (err, columns) => {
+        if (err) return;
+        const hasKhuVuc = columns.some(col => col.name === 'khu_vuc');
+        if (!hasKhuVuc) {
+          console.log("Migrating table 'phong' to include 'khu_vuc'...");
+          db.serialize(() => {
+            db.run('PRAGMA foreign_keys = OFF;');
+            db.run('BEGIN TRANSACTION;');
+            db.run(`
+              CREATE TABLE phong_new (
+                id TEXT PRIMARY KEY,
+                khu_vuc TEXT NOT NULL DEFAULT 'Khu A',
+                so_phong TEXT NOT NULL,
+                tang INTEGER NOT NULL DEFAULT 1,
+                dien_tich REAL NOT NULL DEFAULT 0 CHECK (dien_tich > 0),
+                gia_phong REAL NOT NULL DEFAULT 0 CHECK (gia_phong > 0),
+                trang_thai TEXT NOT NULL DEFAULT 'available' CHECK (trang_thai IN ('available', 'occupied', 'maintenance')),
+                mo_ta TEXT,
+                so_nguoi_toi_da INTEGER NOT NULL DEFAULT 2 CHECK (so_nguoi_toi_da > 0),
+                ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP,
+                ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(khu_vuc, so_phong)
+              )
+            `);
+            db.run(`INSERT INTO phong_new (id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da, ngay_tao, ngay_cap_nhat)
+                    SELECT id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da, ngay_tao, ngay_cap_nhat FROM phong`);
+            db.run('DROP TABLE phong');
+            db.run('ALTER TABLE phong_new RENAME TO phong');
+            db.run('COMMIT;');
+            db.run('PRAGMA foreign_keys = ON;');
+          });
+        }
+      });
+    });
 
     // 2. khach_thue Table (Khách thuê)
     db.run(`

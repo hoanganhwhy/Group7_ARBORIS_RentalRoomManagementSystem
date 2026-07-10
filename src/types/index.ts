@@ -1,5 +1,6 @@
 export interface Room {
   id: string;
+  area: string;
   room_number: string;
   floor: number;
   area_sqm: number;

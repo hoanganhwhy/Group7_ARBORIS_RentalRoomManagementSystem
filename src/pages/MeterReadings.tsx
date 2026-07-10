@@ -301,7 +301,7 @@ export function MeterReadings() {
                       </td>
                       <td className="px-6 py-4">
                         <Badge
-                          status={reading.room?.room_number || ''}
+                          status={reading.room ? `${reading.room.area} - P.${reading.room.room_number}` : ''}
                           variant="default"
                           size="sm"
                         />

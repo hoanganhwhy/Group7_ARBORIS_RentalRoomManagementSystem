@@ -58,6 +58,7 @@ export function Tenants() {
   const [visibleIDs, setVisibleIDs] = useState<Set<string>>(new Set());
   
   const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterArea, setFilterArea] = useState<string>('all');
   const [filterRent, setFilterRent] = useState<string>('all');
   const [filterOccupants, setFilterOccupants] = useState<string>('all');
   const [filterExpiring, setFilterExpiring] = useState<boolean>(false);
@@ -156,6 +157,11 @@ export function Tenants() {
       matchesFloor = room ? room.floor.toString() === filterFloor : false;
     }
     
+    let matchesArea = true;
+    if (filterArea !== 'all') {
+      matchesArea = room ? room.area === filterArea : false;
+    }
+    
     let matchesRent = true;
     if (filterRent !== 'all') {
       if (!room) matchesRent = false;
@@ -177,9 +183,9 @@ export function Tenants() {
       }
     }
 
-    const matchesExpiring = !filterExpiring || (info && expiringContracts.some(ec => ec.id === info.assignment.id));
+    const matchesExpiring = !filterExpiring || expiringContracts.some(ec => ec.tenant_id === t.id);
 
-    return matchesSearch && matchesFloor && matchesRent && matchesOccupants && matchesExpiring;
+    return matchesSearch && matchesArea && matchesFloor && matchesRent && matchesOccupants && matchesExpiring;
   });
 
   function validateField(field: 'phone' | 'email' | 'id_card_number', value: string): string | undefined {
@@ -323,7 +329,7 @@ export function Tenants() {
   }
 
   async function handleCheckout(assignment: RoomAssignment) {
-    if (!confirm('Xác nhận trả phòng?')) return;
+    if (!confirm('Xác nhận trả phòng?\nLƯU Ý: Khách đã thông báo trước 30 ngày chưa? (Nếu chưa, bạn có thể tự thỏa thuận trừ cọc theo quy định trước khi xác nhận).')) return;
     try {
       await endRoomAssignment(assignment.id);
       await loadData();
@@ -386,6 +392,15 @@ export function Tenants() {
             </div>
             {/* Advanced Filters */}
             <div className="flex gap-4 items-center bg-white p-3 rounded-xl border border-charcoal-100 shadow-sm flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-charcoal-500 uppercase">Khu vực / Địa chỉ:</span>
+                <select value={filterArea} onChange={(e) => setFilterArea(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+                  <option value="all">Tất cả</option>
+                  {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium text-charcoal-500 uppercase">Tầng (đang ở):</span>
                 <select value={filterFloor} onChange={(e) => setFilterFloor(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
@@ -668,7 +683,7 @@ function ContactCard({
                 <div className="w-6 h-6 rounded-lg bg-sage-100 flex items-center justify-center">
                   <Home className="w-3 h-3 text-sage-600" />
                 </div>
-                <span className="font-medium">Phòng {room.room_number}</span>
+                <span className="font-medium">{room.area} - P. {room.room_number}</span>
                 {assignment && (
                   <span className="text-charcoal-400 font-normal">
                     từ {new Date(assignment.start_date).toLocaleDateString('vi-VN')}

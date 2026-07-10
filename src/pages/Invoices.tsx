@@ -367,7 +367,7 @@ export function Invoices() {
                     </div>
                   </td>
                   <td className="px-7 py-5">
-                    <p className="font-medium text-charcoal-900">{invoice.room?.room_number}</p>
+                    <p className="font-medium text-charcoal-900">{invoice.room ? `${invoice.room.area} - P.${invoice.room.room_number}` : '—'}</p>
                     <p className="text-sm text-charcoal-400 mt-0.5">{invoice.tenant?.full_name || '—'}</p>
                   </td>
                   <td className="px-7 py-5 text-right text-charcoal-600">

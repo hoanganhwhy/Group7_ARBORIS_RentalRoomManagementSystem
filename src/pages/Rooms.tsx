@@ -46,6 +46,7 @@ export function Rooms() {
   const [extendingAssignment, setExtendingAssignment] = useState<RoomAssignment | null>(null);
   const [filter, setFilter] = useState<'all' | 'available' | 'occupied' | 'maintenance'>('all');
   const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterArea, setFilterArea] = useState<string>('all');
   const [filterRent, setFilterRent] = useState<string>('all');
   const [filterOccupants, setFilterOccupants] = useState<string>('all');
   const [filterExpiring, setFilterExpiring] = useState<boolean>(false);
@@ -56,6 +57,7 @@ export function Rooms() {
     contract_end_date: '',
   });
   const [formData, setFormData] = useState({
+    area: 'Khu A',
     room_number: '',
     floor: '' as string | number,
     area_sqm: '' as string | number,
@@ -95,15 +97,16 @@ export function Rooms() {
 
   function openCreateModal() {
     setEditingRoom(null);
-    setFormData({ room_number: '', floor: 1, area_sqm: '', monthly_rent: '', max_occupants: 2, status: 'available', description: '' });
+    setFormData({ area: 'Khu A', room_number: '', floor: '', area_sqm: '', monthly_rent: '', max_occupants: '', status: 'available', description: '' });
     setIsModalOpen(true);
   }
 
   function openEditModal(room: Room) {
     setEditingRoom(room);
     setFormData({
+      area: room.area,
       room_number: room.room_number,
-      floor: Math.min(room.floor, 50),
+      floor: room.floor,
       area_sqm: room.area_sqm ?? '',
       monthly_rent: room.monthly_rent ?? '',
       max_occupants: room.max_occupants || 2,
@@ -180,6 +183,18 @@ export function Rooms() {
       alert('Tầng không được vượt quá 50.');
       return;
     }
+    
+    // Check for duplicate room in the same area
+    const isDuplicate = rooms.some(r => 
+      r.room_number === formData.room_number && 
+      r.area === formData.area && 
+      r.id !== editingRoom?.id
+    );
+    if (isDuplicate) {
+      alert('Đã tồn tại phòng này ở khu vực / địa chỉ trên.');
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -269,6 +284,7 @@ export function Rooms() {
     const matchesStatus = filter === 'all' || r.status === filter;
     const matchesSearch = !searchQuery || r.room_number.toLowerCase().includes(searchQuery.toLowerCase());
     
+    const matchesArea = filterArea === 'all' || r.area === filterArea;
     const matchesFloor = filterFloor === 'all' || r.floor.toString() === filterFloor;
     
     let matchesRent = true;
@@ -287,7 +303,7 @@ export function Rooms() {
     }
     const matchesExpiring = !filterExpiring || expiringContracts.some(ec => ec.room_id === r.id);
 
-    return matchesStatus && matchesSearch && matchesFloor && matchesRent && matchesOccupants && matchesExpiring;
+    return matchesStatus && matchesSearch && matchesArea && matchesFloor && matchesRent && matchesOccupants && matchesExpiring;
   });
   const statusCounts = {
     all: rooms.length,
@@ -363,6 +379,15 @@ export function Rooms() {
         {/* Advanced Filters */}
         <div className="flex gap-4 items-center bg-white p-3 rounded-xl border border-charcoal-100 shadow-sm flex-wrap">
           <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-charcoal-500 uppercase">Khu vực / Địa chỉ:</span>
+            <select value={filterArea} onChange={(e) => setFilterArea(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+              <option value="all">Tất cả</option>
+              {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-charcoal-500 uppercase">Tầng:</span>
             <select value={filterFloor} onChange={(e) => setFilterFloor(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
               <option value="all">Tất cả</option>
@@ -408,9 +433,9 @@ export function Rooms() {
               <AlertTriangle className="w-5 h-5 text-amber-600" />
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-amber-900">Hợp đồng sắp hết hạn</h3>
+              <h3 className="font-semibold text-amber-900">Sắp hết hạn - Yêu cầu thông báo chuyển trọ trước 30 ngày</h3>
               <p className="text-sm text-amber-700 mt-1">
-                {expiringContracts.length} hợp đồng sẽ hết hạn trong vòng 30 ngày tới
+                Có {expiringContracts.length} hợp đồng sẽ hết hạn trong vòng 30 ngày tới. Vui lòng liên hệ khách để xác nhận gia hạn hoặc thông báo chuyển trọ.
               </p>
               <div className="mt-3 space-y-2">
                 {expiringContracts.map((assignment) => (
@@ -418,7 +443,7 @@ export function Rooms() {
                     <div className="flex items-center gap-3">
                       <CalendarDays className="w-4 h-4 text-amber-600" />
                       <span className="text-sm font-medium text-charcoal-900">
-                        {assignment.tenant?.full_name} - Phòng {assignment.room?.room_number}
+                        {assignment.tenant?.full_name} - {assignment.room ? `${assignment.room.area} - P.${assignment.room.room_number}` : `Phòng ${assignment.room?.room_number}`}
                       </span>
                       <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
                         Hết hạn: {assignment.contract_end_date ? new Date(assignment.contract_end_date).toLocaleDateString('vi-VN') : 'N/A'}
@@ -483,7 +508,7 @@ export function Rooms() {
                 return (
                   <tr key={room.id} className="hover:bg-cream-50/50 transition-colors">
                     <td className="px-6 py-4">
-                      <p className="font-semibold text-charcoal-900">P. {room.room_number}</p>
+                      <p className="font-semibold text-charcoal-900">{room.area} - P. {room.room_number}</p>
                       <p className="text-sm text-charcoal-400">Tầng {room.floor}</p>
                     </td>
                     <td className="px-6 py-4">
@@ -673,18 +698,25 @@ export function Rooms() {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingRoom ? 'Sửa thông tin phòng' : 'Thêm phòng mới'} size="md">
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-charcoal-700">Khu vực / Địa chỉ</label>
+              <input type="text" list="area-list" required className="w-full px-3 py-2 border border-charcoal-200 rounded-lg focus:ring-terra-400 focus:border-terra-400 text-sm" value={formData.area} onChange={(e) => setFormData({ ...formData, area: e.target.value })} placeholder="VD: Khu A, 123 Đường B..." />
+              <datalist id="area-list">
+                {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => <option key={a} value={a} />)}
+              </datalist>
+            </div>
             <Input label="Số phòng" name="room_number" value={formData.room_number} onChange={(v) => setFormData({ ...formData, room_number: v })} required placeholder="VD: 101" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <Input label="Tầng (tối đa 50)" name="floor" type="number" value={formData.floor} onChange={(v) => setFormData({ ...formData, floor: Math.min(parseInt(v) || 1, 50) })} min={1} max={50} required />
+            <Input label="Sức chứa (người)" name="max_occupants" type="number" value={formData.max_occupants} onChange={(v) => setFormData({ ...formData, max_occupants: parseInt(v) || 2 })} min={1} max={10} required />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label="Diện tích (m²)" name="area_sqm" type="number" value={formData.area_sqm} onChange={(v) => setFormData({ ...formData, area_sqm: v })} min={0} step={0.1} />
             <Input label="Giá thuê/tháng (VNĐ)" name="monthly_rent" type="number" value={formData.monthly_rent} onChange={(v) => setFormData({ ...formData, monthly_rent: v })} min={0} required />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Sức chứa (người)" name="max_occupants" type="number" value={formData.max_occupants} onChange={(v) => setFormData({ ...formData, max_occupants: parseInt(v) || 2 })} min={1} max={10} required />
-            <Input label="Trạng thái" name="status" type="select" value={formData.status} onChange={(v) => setFormData({ ...formData, status: v as 'available' | 'occupied' | 'maintenance' })}
-              options={[{ value: 'available', label: 'Trống' }, { value: 'occupied', label: 'Đang thuê' }, { value: 'maintenance', label: 'Bảo trì' }]} />
-          </div>
+          <Input label="Trạng thái" name="status" type="select" value={formData.status} onChange={(v) => setFormData({ ...formData, status: v as 'available' | 'occupied' | 'maintenance' })}
+            options={[{ value: 'available', label: 'Trống' }, { value: 'occupied', label: 'Đang thuê' }, { value: 'maintenance', label: 'Bảo trì' }]} />
           <Input label="Ghi chú" name="description" type="textarea" value={formData.description} onChange={(v) => setFormData({ ...formData, description: v })} placeholder="Mô tả thêm về phòng..." rows={2} />
           <div className="flex gap-3 pt-5 border-t border-charcoal-100">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Hủy</Button>
@@ -818,7 +850,7 @@ function PropertyCard({
               <DoorOpen className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xl font-semibold text-charcoal-900">{room.room_number}</h3>
+              <h3 className="text-xl font-semibold text-charcoal-900 truncate max-w-[150px]" title={`${room.area} - P.${room.room_number}`}>{room.area} - P.{room.room_number}</h3>
               <p className="text-sm text-charcoal-400">Tầng {room.floor}</p>
             </div>
           </div>

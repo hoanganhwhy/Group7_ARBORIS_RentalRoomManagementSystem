@@ -17,6 +17,7 @@ const mapRoom = (r) => {
   if (!r) return null;
   return {
     id: r.id,
+    area: r.khu_vuc,
     room_number: r.so_phong,
     floor: r.tang,
     area_sqm: r.dien_tich,
@@ -241,12 +242,12 @@ app.get('/api/rooms/:id', async (req, res) => {
 app.post('/api/rooms', async (req, res) => {
   try {
     const id = generateId();
-    const { room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2 } = req.body;
+    const { area = 'Khu A', room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2 } = req.body;
     
     await run(`
-      INSERT INTO phong (id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants]);
+      INSERT INTO phong (id, khu_vuc, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, area, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants]);
 
     const room = await queryOne('SELECT * FROM phong WHERE id = ?', [id]);
     res.status(201).json(mapRoom(room));
@@ -257,7 +258,7 @@ app.post('/api/rooms', async (req, res) => {
 
 app.put('/api/rooms/:id', async (req, res) => {
   try {
-    const { room_number, floor, area_sqm, monthly_rent, status, description, max_occupants } = req.body;
+    const { area, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants } = req.body;
     
     const existing = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
     if (!existing) {
@@ -265,6 +266,7 @@ app.put('/api/rooms/:id', async (req, res) => {
     }
 
     const updated = {
+      khu_vuc: area !== undefined ? area : existing.khu_vuc,
       so_phong: room_number !== undefined ? room_number : existing.so_phong,
       tang: floor !== undefined ? floor : existing.tang,
       dien_tich: area_sqm !== undefined ? area_sqm : existing.dien_tich,
@@ -276,9 +278,9 @@ app.put('/api/rooms/:id', async (req, res) => {
 
     await run(`
       UPDATE phong 
-      SET so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      SET khu_vuc = ?, so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [updated.so_phong, updated.tang, updated.dien_tich, updated.gia_phong, updated.trang_thai, updated.mo_ta, updated.so_nguoi_toi_da, req.params.id]);
+    `, [updated.khu_vuc, updated.so_phong, updated.tang, updated.dien_tich, updated.gia_phong, updated.trang_thai, updated.mo_ta, updated.so_nguoi_toi_da, req.params.id]);
 
     const room = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
     res.json(mapRoom(room));
