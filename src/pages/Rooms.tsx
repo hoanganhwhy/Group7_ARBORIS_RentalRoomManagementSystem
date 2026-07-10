@@ -45,6 +45,10 @@ export function Rooms() {
   const [viewingRoom, setViewingRoom] = useState<Room | null>(null);
   const [extendingAssignment, setExtendingAssignment] = useState<RoomAssignment | null>(null);
   const [filter, setFilter] = useState<'all' | 'available' | 'occupied' | 'maintenance'>('all');
+  const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterRent, setFilterRent] = useState<string>('all');
+  const [filterOccupants, setFilterOccupants] = useState<string>('all');
+  const [filterExpiring, setFilterExpiring] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [expiringContracts, setExpiringContracts] = useState<RoomAssignment[]>([]);
@@ -53,10 +57,10 @@ export function Rooms() {
   });
   const [formData, setFormData] = useState({
     room_number: '',
-    floor: 1,
+    floor: '' as string | number,
     area_sqm: '' as string | number,
     monthly_rent: '' as string | number,
-    max_occupants: 2,
+    max_occupants: '' as string | number,
     status: 'available' as 'available' | 'occupied' | 'maintenance',
     description: '',
   });
@@ -180,6 +184,8 @@ export function Rooms() {
     try {
       const payload = {
         ...formData,
+        floor: parseInt(formData.floor as any) || 1,
+        max_occupants: parseInt(formData.max_occupants as any) || 1,
         area_sqm: parseFloat(formData.area_sqm as any) || 0,
         monthly_rent: parseFloat(formData.monthly_rent as any) || 0,
       };
@@ -262,7 +268,26 @@ export function Rooms() {
   const filteredRooms = rooms.filter((r) => {
     const matchesStatus = filter === 'all' || r.status === filter;
     const matchesSearch = !searchQuery || r.room_number.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesStatus && matchesSearch;
+    
+    const matchesFloor = filterFloor === 'all' || r.floor.toString() === filterFloor;
+    
+    let matchesRent = true;
+    if (filterRent === '1m-2.5m') matchesRent = r.monthly_rent >= 1000000 && r.monthly_rent < 2500000;
+    else if (filterRent === '2.5m-4m') matchesRent = r.monthly_rent >= 2500000 && r.monthly_rent <= 4000000;
+    else if (filterRent === '>4m') matchesRent = r.monthly_rent > 4000000;
+    
+    let matchesOccupants = true;
+    if (filterOccupants !== 'all') {
+      const numOccupants = r.active_assignments?.length || 0;
+      if (filterOccupants === '5+') {
+        matchesOccupants = numOccupants >= 5;
+      } else {
+        matchesOccupants = numOccupants.toString() === filterOccupants;
+      }
+    }
+    const matchesExpiring = !filterExpiring || expiringContracts.some(ec => ec.room_id === r.id);
+
+    return matchesStatus && matchesSearch && matchesFloor && matchesRent && matchesOccupants && matchesExpiring;
   });
   const statusCounts = {
     all: rooms.length,
@@ -332,6 +357,45 @@ export function Rooms() {
                 className="pl-9 pr-4 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-48"
               />
             </div>
+          </div>
+        </div>
+        
+        {/* Advanced Filters */}
+        <div className="flex gap-4 items-center bg-white p-3 rounded-xl border border-charcoal-100 shadow-sm flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-charcoal-500 uppercase">Tầng:</span>
+            <select value={filterFloor} onChange={(e) => setFilterFloor(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+              <option value="all">Tất cả</option>
+              {Array.from(new Set(rooms.map(r => r.floor))).sort((a,b) => a - b).map(f => (
+                <option key={f} value={f.toString()}>Tầng {f}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-charcoal-500 uppercase">Giá thuê:</span>
+            <select value={filterRent} onChange={(e) => setFilterRent(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+              <option value="all">Tất cả</option>
+              <option value="1m-2.5m">Từ 1 - 2.5 triệu</option>
+              <option value="2.5m-4m">Từ 2.5 - 4 triệu</option>
+              <option value=">4m">Trên 4 triệu</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-charcoal-500 uppercase">Số người:</span>
+            <select value={filterOccupants} onChange={(e) => setFilterOccupants(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+              <option value="all">Tất cả</option>
+              <option value="1">1 người</option>
+              <option value="2">2 người</option>
+              <option value="3">3 người</option>
+              <option value="4">4 người</option>
+              <option value="5+">5+ người (Nhóm gia đình)</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 ml-auto">
+            <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-charcoal-700">
+              <input type="checkbox" checked={filterExpiring} onChange={(e) => setFilterExpiring(e.target.checked)} className="rounded text-amber-500 focus:ring-amber-500" />
+              Sắp hết hạn
+            </label>
           </div>
         </div>
       </section>

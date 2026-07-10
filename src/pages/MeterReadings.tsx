@@ -42,6 +42,8 @@ export function MeterReadings() {
 
   const [saving, setSaving] = useState(false);
   const [loadingPrevious, setLoadingPrevious] = useState(false);
+  const [filterMonth, setFilterMonth] = useState<number>(0);
+  const [filterYear, setFilterYear] = useState<number>(0);
 
   useEffect(() => {
     loadData();
@@ -198,6 +200,13 @@ export function MeterReadings() {
   const electricityCost = electricityUsage * elecPrice;
   const waterCost = waterUsage * watPrice;
 
+  const filteredReadings = readings.filter((r) => {
+    const d = new Date(r.reading_date);
+    const matchesMonth = filterMonth === 0 || (d.getMonth() + 1) === filterMonth;
+    const matchesYear = filterYear === 0 || d.getFullYear() === filterYear;
+    return matchesMonth && matchesYear;
+  });
+
   if (loading) return <Spinner />;
 
   return (
@@ -214,7 +223,23 @@ export function MeterReadings() {
         </Button>
       </header>
 
-      {readings.length === 0 ? (
+      {/* Filters */}
+      <section className="flex gap-4">
+        <select value={filterMonth} onChange={(e) => setFilterMonth(Number(e.target.value))} className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-40">
+          <option value={0}>Tất cả tháng</option>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+            <option key={m} value={m}>Tháng {m}</option>
+          ))}
+        </select>
+        <select value={filterYear} onChange={(e) => setFilterYear(Number(e.target.value))} className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-40">
+          <option value={0}>Tất cả năm</option>
+          {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+      </section>
+
+      {filteredReadings.length === 0 ? (
         <EmptyState
           icon={<Zap className="w-8 h-8" />}
           title="Chưa có chỉ số nào"
@@ -257,7 +282,7 @@ export function MeterReadings() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-charcoal-100">
-                {readings.map((reading) => {
+                {filteredReadings.map((reading) => {
                   const elecUsage = reading.electricity_new - reading.electricity_old;
                   const waterUsage = reading.water_new - reading.water_old;
                   const elecCost = elecUsage * reading.electricity_price_per_unit;

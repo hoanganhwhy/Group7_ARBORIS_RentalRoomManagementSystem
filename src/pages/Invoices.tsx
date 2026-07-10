@@ -34,8 +34,7 @@ export function Invoices() {
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
   const [filter, setFilter] = useState<'pending' | 'paid' | 'overdue'>('pending');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
-  const [filterQuarter, setFilterQuarter] = useState<number>(0); // 0 = all
-  const [filterYear, setFilterYear] = useState<number>(new Date().getFullYear());
+  const [filterYear, setFilterYear] = useState<number>(0); // 0 = all
 
   const [formData, setFormData] = useState({
     room_id: '',
@@ -45,7 +44,7 @@ export function Invoices() {
     room_rent: '' as string | number,
     electricity_cost: '' as string | number,
     water_cost: '' as string | number,
-    other_fees: '' as string | number,
+    other_fees: '',
     due_date: '',
     notes: '',
   });
@@ -208,10 +207,9 @@ export function Invoices() {
 
   const filteredInvoices = invoices.filter((invoice) => {
     const matchesStatus = invoice.status === filter;
-    const matchesYear = invoice.invoice_year === filterYear;
+    const matchesYear = filterYear === 0 || invoice.invoice_year === filterYear;
     const matchesMonth = filterMonth === 0 || invoice.invoice_month === filterMonth;
-    const matchesQuarter = filterQuarter === 0 || Math.ceil(invoice.invoice_month / 3) === filterQuarter;
-    return matchesStatus && matchesYear && matchesMonth && matchesQuarter;
+    return matchesStatus && matchesYear && matchesMonth;
   });
 
   const statusCounts = {
@@ -320,21 +318,12 @@ export function Invoices() {
               ))}
             </select>
             <select
-              value={filterQuarter}
-              onChange={(e) => setFilterQuarter(Number(e.target.value))}
-              className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-            >
-              <option value={0}>Tất cả quý</option>
-              {[1, 2, 3, 4].map((q) => (
-                <option key={q} value={q}>Quý {q}</option>
-              ))}
-            </select>
-            <select
               value={filterYear}
               onChange={(e) => setFilterYear(Number(e.target.value))}
               className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
             >
-              {Array.from(new Set([new Date().getFullYear(), ...invoices.map(i => i.invoice_year)])).sort((a,b) => b - a).map((y) => (
+              <option value={0}>Tất cả năm</option>
+              {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i).map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>

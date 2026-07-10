@@ -11,6 +11,7 @@ import {
   getRooms,
   assignTenantToRoom,
   endRoomAssignment,
+  getExpiringContracts,
 } from '../lib/api';
 import type { Tenant, Room, RoomAssignment } from '../types';
 
@@ -55,6 +56,12 @@ export function Tenants() {
   const [visiblePhones, setVisiblePhones] = useState<Set<string>>(new Set());
   const [visibleEmails, setVisibleEmails] = useState<Set<string>>(new Set());
   const [visibleIDs, setVisibleIDs] = useState<Set<string>>(new Set());
+  
+  const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterRent, setFilterRent] = useState<string>('all');
+  const [filterOccupants, setFilterOccupants] = useState<string>('all');
+  const [filterExpiring, setFilterExpiring] = useState<boolean>(false);
+  const [expiringContracts, setExpiringContracts] = useState<RoomAssignment[]>([]);
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -89,9 +96,14 @@ export function Tenants() {
 
   async function loadData() {
     try {
-      const [tenantsData, roomsData] = await Promise.all([getTenants(), getRooms()]);
+      const [tenantsData, roomsData, expiringData] = await Promise.all([
+        getTenants(), 
+        getRooms(),
+        getExpiringContracts(30).catch(() => [] as RoomAssignment[])
+      ]);
       setTenants(tenantsData);
       setRooms(roomsData);
+      setExpiringContracts(expiringData);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -134,7 +146,40 @@ export function Tenants() {
       ? t.phone.replace(/\D/g, '').includes(searchQuery.replace(/\D/g, '')) ||
         t.phone.includes(searchQuery)
       : false;
-    return nameMatch || phoneMatch;
+    const matchesSearch = nameMatch || phoneMatch;
+
+    const info = getTenantAssignment(t.id);
+    const room = info?.room;
+    
+    let matchesFloor = true;
+    if (filterFloor !== 'all') {
+      matchesFloor = room ? room.floor.toString() === filterFloor : false;
+    }
+    
+    let matchesRent = true;
+    if (filterRent !== 'all') {
+      if (!room) matchesRent = false;
+      else if (filterRent === '1m-2.5m') matchesRent = room.monthly_rent >= 1000000 && room.monthly_rent < 2500000;
+      else if (filterRent === '2.5m-4m') matchesRent = room.monthly_rent >= 2500000 && room.monthly_rent <= 4000000;
+      else if (filterRent === '>4m') matchesRent = room.monthly_rent > 4000000;
+    }
+
+    let matchesOccupants = true;
+    if (filterOccupants !== 'all') {
+      if (!room) matchesOccupants = false;
+      else {
+        const numOccupants = room.active_assignments?.length || 0;
+        if (filterOccupants === '5+') {
+          matchesOccupants = numOccupants >= 5;
+        } else {
+          matchesOccupants = numOccupants.toString() === filterOccupants;
+        }
+      }
+    }
+
+    const matchesExpiring = !filterExpiring || (info && expiringContracts.some(ec => ec.id === info.assignment.id));
+
+    return matchesSearch && matchesFloor && matchesRent && matchesOccupants && matchesExpiring;
   });
 
   function validateField(field: 'phone' | 'email' | 'id_card_number', value: string): string | undefined {
@@ -327,16 +372,56 @@ export function Tenants() {
         </div>
       ) : (
         <>
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400" />
-            <input
-              type="text"
-              placeholder="Tìm theo tên hoặc số điện thoại..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full max-w-md pl-11 pr-4 py-3 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-            />
+          {/* Filters & Search */}
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400" />
+              <input
+                type="text"
+                placeholder="Tìm theo tên hoặc số điện thoại..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full max-w-md pl-11 pr-4 py-3 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+              />
+            </div>
+            {/* Advanced Filters */}
+            <div className="flex gap-4 items-center bg-white p-3 rounded-xl border border-charcoal-100 shadow-sm flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-charcoal-500 uppercase">Tầng (đang ở):</span>
+                <select value={filterFloor} onChange={(e) => setFilterFloor(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+                  <option value="all">Tất cả</option>
+                  {Array.from(new Set(rooms.map(r => r.floor))).sort((a,b) => a - b).map(f => (
+                    <option key={f} value={f.toString()}>Tầng {f}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-charcoal-500 uppercase">Giá phòng:</span>
+                <select value={filterRent} onChange={(e) => setFilterRent(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+                  <option value="all">Tất cả</option>
+                  <option value="1m-2.5m">Từ 1 - 2.5 triệu</option>
+                  <option value="2.5m-4m">Từ 2.5 - 4 triệu</option>
+                  <option value=">4m">Trên 4 triệu</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-charcoal-500 uppercase">Số người chung:</span>
+                <select value={filterOccupants} onChange={(e) => setFilterOccupants(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+                  <option value="all">Tất cả</option>
+                  <option value="1">1 người</option>
+                  <option value="2">2 người</option>
+                  <option value="3">3 người</option>
+                  <option value="4">4 người</option>
+                  <option value="5+">5+ người (Nhóm gia đình)</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-charcoal-700">
+                  <input type="checkbox" checked={filterExpiring} onChange={(e) => setFilterExpiring(e.target.checked)} className="rounded text-amber-500 focus:ring-amber-500" />
+                  Hợp đồng sắp hết hạn
+                </label>
+              </div>
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-6">
             {filteredTenants.map((tenant) => {
@@ -384,7 +469,7 @@ export function Tenants() {
                     const newPhone = e.target.value + parsedPhone.body;
                     updatePhone(newPhone);
                   }}
-                  className="w-1/3 px-3.5 py-2.5 rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+                  className="min-w-[140px] w-auto shrink-0 px-3.5 py-2.5 rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
                 >
                   {countryCodes.map((c) => (
                     <option key={c.code} value={c.code}>
