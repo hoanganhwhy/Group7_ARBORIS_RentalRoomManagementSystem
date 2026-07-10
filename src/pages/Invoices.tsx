@@ -35,6 +35,9 @@ export function Invoices() {
   const [filter, setFilter] = useState<'pending' | 'paid' | 'overdue'>('pending');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
   const [filterYear, setFilterYear] = useState<number>(0); // 0 = all
+  const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterArea, setFilterArea] = useState<string>('all');
+  const [filterDate, setFilterDate] = useState<string>('');
 
   const [formData, setFormData] = useState({
     room_id: '',
@@ -209,7 +212,10 @@ export function Invoices() {
     const matchesStatus = invoice.status === filter;
     const matchesYear = filterYear === 0 || invoice.invoice_year === filterYear;
     const matchesMonth = filterMonth === 0 || invoice.invoice_month === filterMonth;
-    return matchesStatus && matchesYear && matchesMonth;
+    const matchesFloor = filterFloor === 'all' || (invoice.room && invoice.room.floor.toString() === filterFloor);
+    const matchesArea = filterArea === 'all' || (invoice.room && invoice.room.area === filterArea);
+    const matchesDate = !filterDate || (invoice.due_date && invoice.due_date.startsWith(filterDate));
+    return matchesStatus && matchesYear && matchesMonth && matchesFloor && matchesArea && matchesDate;
   });
 
   const statusCounts = {
@@ -306,11 +312,38 @@ export function Invoices() {
               }`}>{statusCounts[status]}</span>
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-4 flex-wrap">
+            <input
+              type="date"
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+              className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+              title="Lọc theo ngày thanh toán"
+            />
+            <select
+              value={filterArea}
+              onChange={(e) => setFilterArea(e.target.value)}
+              className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+            >
+              <option value="all">Tất cả khu vực</option>
+              {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+            <select
+              value={filterFloor}
+              onChange={(e) => setFilterFloor(e.target.value)}
+              className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+            >
+              <option value="all">Tất cả tầng</option>
+              {Array.from(new Set(rooms.map(r => r.floor))).sort((a,b)=>Number(a)-Number(b)).map(f => (
+                <option key={f} value={f}>Tầng {f}</option>
+              ))}
+            </select>
             <select
               value={filterMonth}
               onChange={(e) => setFilterMonth(Number(e.target.value))}
-              className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+              className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
             >
               <option value={0}>Tất cả tháng</option>
               {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
@@ -320,7 +353,7 @@ export function Invoices() {
             <select
               value={filterYear}
               onChange={(e) => setFilterYear(Number(e.target.value))}
-              className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+              className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
             >
               <option value={0}>Tất cả năm</option>
               {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i).map((y) => (

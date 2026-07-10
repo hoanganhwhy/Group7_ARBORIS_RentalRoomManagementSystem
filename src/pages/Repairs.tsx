@@ -37,6 +37,11 @@ export function Repairs() {
   const [viewingRepair, setViewingRepair] = useState<RepairRequest | null>(null);
   const [deletingRepair, setDeletingRepair] = useState<RepairRequest | null>(null);
   const [filter, setFilter] = useState<'new' | 'in_progress' | 'resolved' | 'closed'>('new');
+  const [filterMonth, setFilterMonth] = useState<number>(0);
+  const [filterYear, setFilterYear] = useState<number>(0);
+  const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterArea, setFilterArea] = useState<string>('all');
+  const [filterDate, setFilterDate] = useState<string>('');
 
   const [formData, setFormData] = useState({
     room_id: '',
@@ -159,7 +164,17 @@ export function Repairs() {
   }
 
   const filteredRepairs = repairs.filter((repair) => {
-    return repair.status === filter;
+    const matchesStatus = repair.status === filter;
+    
+    // Parse reported_at date
+    const d = new Date(repair.reported_at);
+    const matchesYear = filterYear === 0 || d.getFullYear() === filterYear;
+    const matchesMonth = filterMonth === 0 || (d.getMonth() + 1) === filterMonth;
+    const matchesFloor = filterFloor === 'all' || (repair.room && repair.room.floor.toString() === filterFloor);
+    const matchesArea = filterArea === 'all' || (repair.room && repair.room.area === filterArea);
+    const matchesDate = !filterDate || repair.reported_at.startsWith(filterDate);
+
+    return matchesStatus && matchesYear && matchesMonth && matchesFloor && matchesArea && matchesDate;
   });
 
   const statusCounts = {
@@ -216,6 +231,56 @@ export function Repairs() {
               }`}>{statusCounts[status]}</span>
             </button>
           ))}
+        </div>
+        
+        <div className="flex items-center gap-4 flex-wrap bg-white p-3 rounded-xl border border-charcoal-100 shadow-sm">
+          <input
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+            title="Lọc theo ngày báo cáo"
+          />
+          <select
+            value={filterArea}
+            onChange={(e) => setFilterArea(e.target.value)}
+            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+          >
+            <option value="all">Tất cả khu vực</option>
+            {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+          <select
+            value={filterFloor}
+            onChange={(e) => setFilterFloor(e.target.value)}
+            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+          >
+            <option value="all">Tất cả tầng</option>
+            {Array.from(new Set(rooms.map(r => r.floor))).sort((a,b)=>Number(a)-Number(b)).map(f => (
+              <option key={f} value={f}>Tầng {f}</option>
+            ))}
+          </select>
+          <select
+            value={filterMonth}
+            onChange={(e) => setFilterMonth(Number(e.target.value))}
+            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+          >
+            <option value={0}>Tất cả tháng</option>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+              <option key={m} value={m}>Tháng {m}</option>
+            ))}
+          </select>
+          <select
+            value={filterYear}
+            onChange={(e) => setFilterYear(Number(e.target.value))}
+            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+          >
+            <option value={0}>Tất cả năm</option>
+            {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
         </div>
       </section>
 
