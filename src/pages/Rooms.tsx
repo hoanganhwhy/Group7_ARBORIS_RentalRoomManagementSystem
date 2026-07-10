@@ -28,7 +28,7 @@ import {
   extendContract,
 } from '../lib/api';
 import type { Room, Tenant, RoomAssignment } from '../types';
-import { Search, AlertTriangle, CalendarDays, RefreshCw } from 'lucide-react';
+import { Search, AlertTriangle, CalendarDays, RefreshCw, LayoutGrid, List as ListIcon } from 'lucide-react';
 
 export function Rooms() {
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -45,6 +45,7 @@ export function Rooms() {
   const [viewingRoom, setViewingRoom] = useState<Room | null>(null);
   const [extendingAssignment, setExtendingAssignment] = useState<RoomAssignment | null>(null);
   const [filter, setFilter] = useState<'all' | 'available' | 'occupied' | 'maintenance'>('all');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [expiringContracts, setExpiringContracts] = useState<RoomAssignment[]>([]);
   const [extendData, setExtendData] = useState({
@@ -312,15 +313,25 @@ export function Rooms() {
               }`}>{statusCounts[status]}</span>
             </button>
           ))}
-          <div className="relative ml-auto">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400" />
-            <input
-              type="text"
-              placeholder="Tìm theo số phòng..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-4 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-48"
-            />
+          <div className="relative ml-auto flex items-center gap-3">
+            <div className="flex bg-charcoal-50 p-1 rounded-xl">
+              <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-white shadow-sm text-charcoal-900' : 'text-charcoal-400 hover:text-charcoal-600'}`} title="Dạng thẻ">
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+              <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-white shadow-sm text-charcoal-900' : 'text-charcoal-400 hover:text-charcoal-600'}`} title="Dạng danh sách">
+                <ListIcon className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400" />
+              <input
+                type="text"
+                placeholder="Tìm theo số phòng..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-4 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-48"
+              />
+            </div>
           </div>
         </div>
       </section>
@@ -374,7 +385,7 @@ export function Rooms() {
             action={<Button onClick={openCreateModal}><Plus className="w-4 h-4" />Thêm phòng</Button>}
           />
         </div>
-      ) : (
+      ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-3 gap-6">
           {filteredRooms.map((room) => (
             <PropertyCard
@@ -388,6 +399,68 @@ export function Rooms() {
               onSetPrimary={handleSetPrimary}
             />
           ))}
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-charcoal-100">
+                <th className="text-left px-6 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Phòng</th>
+                <th className="text-left px-6 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Trạng thái</th>
+                <th className="text-right px-6 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Giá thuê</th>
+                <th className="text-right px-6 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Diện tích</th>
+                <th className="text-left px-6 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Khách thuê</th>
+                <th className="px-6 py-4"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-charcoal-50">
+              {filteredRooms.map((room) => {
+                const variants: Record<string, 'success' | 'info' | 'default'> = { available: 'success', occupied: 'info', maintenance: 'default' };
+                return (
+                  <tr key={room.id} className="hover:bg-cream-50/50 transition-colors">
+                    <td className="px-6 py-4">
+                      <p className="font-semibold text-charcoal-900">P. {room.room_number}</p>
+                      <p className="text-sm text-charcoal-400">Tầng {room.floor}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Badge status={room.status} variant={variants[room.status] || 'default'} size="sm" />
+                    </td>
+                    <td className="px-6 py-4 text-right font-medium text-terra-600">
+                      {room.monthly_rent.toLocaleString('vi-VN')}đ
+                    </td>
+                    <td className="px-6 py-4 text-right text-charcoal-600">
+                      {room.area_sqm} m²
+                    </td>
+                    <td className="px-6 py-4">
+                      {room.status === 'occupied' && (room.active_assignments?.length ?? 0) > 0 ? (
+                        <div>
+                          <p className="font-medium text-charcoal-900">
+                            {room.active_assignments?.find(a => a.is_primary)?.tenant?.full_name || room.active_assignments?.[0]?.tenant?.full_name || 'Khách thuê'}
+                          </p>
+                          <p className="text-xs text-charcoal-400">{room.active_assignments?.length} người đang ở</p>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-charcoal-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => openDetailModal(room)} className="p-2 text-charcoal-400 hover:text-charcoal-600 hover:bg-charcoal-50 rounded-lg" title="Chi tiết">
+                          <Info className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => openEditModal(room)} className="p-2 text-charcoal-400 hover:text-terra-600 hover:bg-terra-50 rounded-lg" title="Sửa">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => openDeleteModal(room)} className="p-2 text-charcoal-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg" title="Xóa">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

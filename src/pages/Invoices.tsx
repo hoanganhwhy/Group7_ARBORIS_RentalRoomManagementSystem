@@ -32,8 +32,9 @@ export function Invoices() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
+  const [filter, setFilter] = useState<'pending' | 'paid' | 'overdue'>('pending');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
+  const [filterQuarter, setFilterQuarter] = useState<number>(0); // 0 = all
   const [filterYear, setFilterYear] = useState<number>(new Date().getFullYear());
 
   const [formData, setFormData] = useState({
@@ -206,14 +207,14 @@ export function Invoices() {
   }
 
   const filteredInvoices = invoices.filter((invoice) => {
-    const matchesStatus = filter === 'all' || invoice.status === filter;
+    const matchesStatus = invoice.status === filter;
     const matchesYear = invoice.invoice_year === filterYear;
     const matchesMonth = filterMonth === 0 || invoice.invoice_month === filterMonth;
-    return matchesStatus && matchesYear && matchesMonth;
+    const matchesQuarter = filterQuarter === 0 || Math.ceil(invoice.invoice_month / 3) === filterQuarter;
+    return matchesStatus && matchesYear && matchesMonth && matchesQuarter;
   });
 
   const statusCounts = {
-    all: invoices.length,
     pending: invoices.filter((i) => i.status === 'pending').length,
     paid: invoices.filter((i) => i.status === 'paid').length,
     overdue: invoices.filter((i) => i.status === 'overdue').length,
@@ -289,7 +290,7 @@ export function Invoices() {
       {/* Filters */}
       <section className="space-y-4">
         <div className="flex gap-2 items-center flex-wrap">
-          {(['all', 'pending', 'paid', 'overdue'] as const).map((status) => (
+          {(['pending', 'paid', 'overdue'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilter(status)}
@@ -299,9 +300,8 @@ export function Invoices() {
                   : 'text-charcoal-400 hover:text-charcoal-600 hover:bg-white/50'
               }`}
             >
-              {status === 'all' && 'Tất cả'}
               {status === 'pending' && 'Chờ thanh toán'}
-              {status === 'paid' && 'Đã thanh toán'}
+              {status === 'paid' && 'Lịch sử'}
               {status === 'overdue' && 'Quá hạn'}
               <span className={`ml-2 px-2 py-0.5 rounded-lg text-xs ${
                 filter === status ? 'bg-terra-100 text-terra-700' : 'bg-charcoal-100 text-charcoal-500'
@@ -320,11 +320,21 @@ export function Invoices() {
               ))}
             </select>
             <select
+              value={filterQuarter}
+              onChange={(e) => setFilterQuarter(Number(e.target.value))}
+              className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+            >
+              <option value={0}>Tất cả quý</option>
+              {[1, 2, 3, 4].map((q) => (
+                <option key={q} value={q}>Quý {q}</option>
+              ))}
+            </select>
+            <select
               value={filterYear}
               onChange={(e) => setFilterYear(Number(e.target.value))}
               className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
             >
-              {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - 5 + i).map((y) => (
+              {Array.from(new Set([new Date().getFullYear(), ...invoices.map(i => i.invoice_year)])).sort((a,b) => b - a).map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
@@ -485,6 +495,7 @@ export function Invoices() {
               onChange={(v) => setFormData({ ...formData, room_rent: v })}
               min={0}
               required
+              disabled={true}
             />
             <Input
               label="Hạn thanh toán"

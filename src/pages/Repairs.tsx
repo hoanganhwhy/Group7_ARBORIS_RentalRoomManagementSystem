@@ -36,7 +36,7 @@ export function Repairs() {
   const [editingRepair, setEditingRepair] = useState<RepairRequest | null>(null);
   const [viewingRepair, setViewingRepair] = useState<RepairRequest | null>(null);
   const [deletingRepair, setDeletingRepair] = useState<RepairRequest | null>(null);
-  const [filter, setFilter] = useState<'all' | 'new' | 'in_progress' | 'resolved' | 'closed'>('all');
+  const [filter, setFilter] = useState<'new' | 'in_progress' | 'resolved' | 'closed'>('new');
 
   const [formData, setFormData] = useState({
     room_id: '',
@@ -158,10 +158,11 @@ export function Repairs() {
     }
   }
 
-  const filteredRepairs = repairs.filter((r) => filter === 'all' || r.status === filter);
+  const filteredRepairs = repairs.filter((repair) => {
+    return repair.status === filter;
+  });
 
   const statusCounts = {
-    all: repairs.length,
     new: repairs.filter((r) => r.status === 'new').length,
     in_progress: repairs.filter((r) => r.status === 'in_progress').length,
     resolved: repairs.filter((r) => r.status === 'resolved').length,
@@ -195,20 +196,21 @@ export function Repairs() {
 
       {/* Filters */}
       <section className="space-y-4">
-        <div className="flex gap-2 flex-wrap">
-          {(['all', 'new', 'in_progress', 'resolved', 'closed'] as const).map((status) => (
-            <button key={status} onClick={() => setFilter(status)}
+        <div className="flex gap-2 items-center flex-wrap">
+          {(['new', 'in_progress', 'resolved', 'closed'] as const).map((status) => (
+            <button
+              key={status}
+              onClick={() => setFilter(status)}
               className={`px-5 py-2.5 text-sm font-medium rounded-xl transition-all ${
                 filter === status
                   ? 'bg-white text-charcoal-900 shadow-card border border-charcoal-100'
                   : 'text-charcoal-400 hover:text-charcoal-600 hover:bg-white/50'
               }`}
             >
-              {status === 'all' && 'Tất cả'}
-              {status === 'new' && 'Mới'}
+              {status === 'new' && 'Mới tạo'}
               {status === 'in_progress' && 'Đang xử lý'}
               {status === 'resolved' && 'Đã xong'}
-              {status === 'closed' && 'Đã đóng'}
+              {status === 'closed' && 'Lịch sử'}
               <span className={`ml-2 px-2 py-0.5 rounded-lg text-xs ${
                 filter === status ? 'bg-terra-100 text-terra-700' : 'bg-charcoal-100 text-charcoal-500'
               }`}>{statusCounts[status]}</span>
@@ -278,7 +280,7 @@ export function Repairs() {
             />
             <Input label="Trạng thái" name="status" type="select" value={formData.status}
               onChange={(v) => setFormData({ ...formData, status: v as 'new' | 'in_progress' | 'resolved' | 'closed' })}
-              options={[{ value: 'new', label: 'Mới tạo' }, { value: 'in_progress', label: 'Đang xử lý' }, { value: 'resolved', label: 'Đã xong' }, { value: 'closed', label: 'Đã đóng' }]}
+              options={[{ value: 'new', label: 'Mới tạo' }, { value: 'in_progress', label: 'Đang xử lý' }, { value: 'resolved', label: 'Đã xong' }, { value: 'closed', label: 'Lịch sử' }]}
             />
           </div>
           <Input label="Người phụ trách" name="assigned_to" value={formData.assigned_to} onChange={(v) => setFormData({ ...formData, assigned_to: v })} placeholder="VD: Nguyễn Văn A" />

@@ -399,12 +399,6 @@ app.post('/api/room_assignments', async (req, res) => {
       return res.status(400).json({ error: `Phòng đã đầy (tối đa ${maxOccupants} người).` });
     }
 
-    // Check if tenant already has an active assignment in a DIFFERENT room
-    const existingDiffRoom = await query('SELECT id FROM hop_dong_thue WHERE khach_thue_id = ? AND dang_hoat_dong = 1 AND phong_id != ?', [tenant_id, room_id]);
-    if (existingDiffRoom.length > 0) {
-      return res.status(400).json({ error: 'Người thuê này đang thuê phòng khác rồi. Vui lòng trả phòng cũ trước.' });
-    }
-
     // Check not already in this room
     const sameRoom = await query('SELECT id FROM hop_dong_thue WHERE khach_thue_id = ? AND phong_id = ? AND dang_hoat_dong = 1', [tenant_id, room_id]);
     if (sameRoom.length > 0) {
