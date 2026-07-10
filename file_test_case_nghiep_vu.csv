@@ -1,0 +1,45 @@
+﻿1. PHÂN TÍCH QUYẾT ĐỊNH (DECISION TABLE) - KIỂM THỬ GHI CHỈ SỐ ĐIỆN NƯỚC
+1.1 Các điều kiện đầu vào:
+Ký hiệu,Điều kiện,Mô tả chi tiết
+C1,Chỉ số mới so với chỉ số cũ,
+",,""- D1: Chỉ số điện/nước mới < Chỉ số cũ (Lỗi giảm chỉ số)"""
+",,""- D2: Chỉ số điện/nước mới >= Chỉ số cũ (Hợp lệ)"""
+C2,Trạng thái điền dữ liệu,
+",,""- I1: Bỏ trống bất kỳ ô số nào (Trống/Null/Chuỗi rỗng)"""
+",,""- I2: Nhập đầy đủ tất cả các ô số"""
+C3,Giá trị số nhập vào,
+",,""- V1: Chứa số âm ( < 0 )"""
+",,""- V2: Chỉ chứa các số không âm ( >= 0 )"""
+
+1.2 Bảng quyết định (Decision Table):
+Quy tắc (Rule),R1,R2,R3,R4,R5
+C1: Quan hệ chỉ số,-,-,D1,D2,D2
+C2: Trạng thái nhập,I1,I2,I2,I2,I2
+C3: Giá trị số,-,V1,V2,V1,V2
+Hành động (Action),,,,,
+A1: Từ chối & Báo lỗi bỏ trống,X,,,,
+A2: Từ chối & Báo lỗi số âm,,X,,X,
+A3: Từ chối & Báo lỗi mới < cũ,,,X,,
+A4: Chấp nhận & Lưu dữ liệu,,,,X
+
+2. PHÂN HOẠCH TƯƠNG ĐƯƠNG (EQUIVALENCE CLASS PARTITIONING)
+Điều kiện kiểm tra,Lớp tương đương hợp lệ (Valid),Số hiệu,Lớp tương đương không hợp lệ (Invalid),Số hiệu
+Nhập chỉ số điện nước,Số điện/nước mới >= cũ,1,Số điện/nước mới < cũ,4
+Trạng thái ô nhập,Điền đầy đủ số và không rỗng,2,Để trống hoặc chứa ký tự chữ/null,5
+Giá trị số nhập vào,Số lớn hơn hoặc bằng 0 (>= 0),3,Số nhỏ hơn 0 (< 0),6
+
+3. PHÂN TÍCH GIÁ TRỊ BIÊN (BOUNDARY VALUE ANALYSIS)
+ID,Số cũ (kW/m3),Số mới nhập,Kỳ vọng kết quả,Ghi chú nghiệp vụ kiểm tra biên
+B-01,100,99,Từ chối & Báo lỗi nhỏ hơn số cũ,Giá trị biên dưới sát chỉ số cũ (Cận kề lỗi)
+B-02,100,100,Chấp nhận & Lưu thành công,Giá trị biên trùng chỉ số cũ (Tiêu thụ bằng 0)
+B-03,100,101,Chấp nhận & Lưu thành công,Giá trị biên trên sát chỉ số cũ (Tiêu thụ 1 số)
+B-04,100,-1,Từ chối & Báo lỗi số âm,Giá trị biên số âm (Nhỏ hơn 0)
+B-05,100,0,Từ chối & Báo lỗi nhỏ hơn số cũ,Giá trị biên bằng 0 (Thỏa mãn không âm nhưng vi phạm nhỏ hơn số cũ)
+B-06,100,999999,Chấp nhận & Lưu thành công,Giá trị biên cực đại (Chỉ số lớn)
+
+4. DANH SÁCH CÁC TEST CASES CHI TIẾT
+Mã Test Case,Điều kiện đầu vào (Input),Đầu ra kỳ vọng (Expected Output),Mô tả kịch bản test
+"TC-01,""Chỉ số cũ = 100, Mới = [Trống]"",""Mã lỗi 400: Các trường chỉ số điện nước không được để trống."",""Kiểm tra chặn ô nhập trống"""
+"TC-02,""Chỉ số cũ = 100, Mới = -5"",""Mã lỗi 400: Các trường chỉ số điện nước không được để trống hoặc số âm."",""Kiểm tra chặn giá trị âm"""
+"TC-03,""Chỉ số cũ = 100, Mới = 80"",""Mã lỗi 400: Chỉ số điện mới không được nhỏ hơn chỉ số cũ."",""Kiểm tra chặn số mới nhỏ hơn số cũ"""
+"TC-04,""Chỉ số cũ = 100, Mới = 120"",""Mã trạng thái 201: Thành công & Lưu chỉ số mới = 120"",""Kiểm tra lưu chỉ số hợp lệ"""
