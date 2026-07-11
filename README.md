@@ -1,63 +1,75 @@
-<<<<<<< HEAD
 # HostelMate - Hệ Thống Quản Lý Phòng Trọ Chuyên Nghiệp
 
 HostelMate là giải pháp phần mềm quản lý phòng trọ, căn hộ dịch vụ và nhà cho thuê toàn diện, được xây dựng trên nền tảng **React (Frontend)** và **Node.js Express + SQLite (Backend)**. 
 
-Dự án tích hợp đầy đủ quy trình kiểm thử tự động (Unit Test), kiểm tra tĩnh code style (ESLint), tài liệu phát triển (SDLC), và luồng tích hợp liên tục (GitHub Actions CI) đảm bảo chất lượng vận hành cao nhất.
+Dự án có kiến trúc Module phân quyền (RBAC) rõ ràng giữa **Chủ trọ (Admin)** và **Khách thuê (Tenant)**, tích hợp luồng nghiệp vụ thực tế, giao diện tự động làm mới (Polling) và webhook thanh toán trực tuyến.
 
 ---
 
 ## 1. Các Phân Hệ & Tính Năng Chính
 
-* **🏠 Phân hệ Quản lý Phòng trọ (Rooms API)**: Theo dõi thông tin chi tiết các phòng trọ, số tầng, diện tích, giá phòng, trạng thái phòng (`available`, `occupied`, `maintenance`) và sức chứa tối đa. Chặn xóa phòng nếu đang có người thuê.
-* **👥 Phân hệ Quản lý Khách thuê (Tenants API)**: Lưu trữ hồ sơ thông tin cá nhân khách thuê, tích hợp mã số điện thoại quốc gia định dạng chuẩn E.164 (mặc định Việt Nam `+84` và hỗ trợ nhiều quốc gia khác).
-* **📄 Phân hệ Hợp đồng & Thuê phòng (Room Assignments API)**: Thực hiện nghiệp vụ check-in nhận phòng, gán khách thuê đại diện (chịu trách nhiệm chính), gia hạn thời hạn hợp đồng và thanh lý hợp đồng (check-out) tự động cập nhật trạng thái phòng.
-* **⚡ Phân hệ Chỉ số Điện nước (Meter Readings API)**: Ghi nhận lịch sử tiêu thụ số điện, số nước tiêu thụ thực tế hàng tháng của từng phòng. Hệ thống tự động ràng buộc chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ để tránh số âm.
-* **🧾 Phân hệ Quản lý Hóa đơn (Invoices API)**: Tự động hóa việc lập phiếu thu tiền phòng trọ và dịch vụ (tiền phòng + điện + nước + chi phí khác). Cho phép chọn linh hoạt **Tháng/Năm** qua dropdown tránh nhầm lẫn và tích hợp tính năng **xuất hóa đơn Excel/CSV** chuẩn UTF-8 BOM hiển thị đầy đủ tiếng Việt không lỗi font.
-* **🛠️ Phân hệ Báo hỏng & Sửa chữa (Repair Requests API)**: Tiếp nhận sự cố dịch vụ từ khách thuê (thiết bị hỏng hóc trong phòng). Nghiệp vụ ràng buộc người báo hỏng phải là khách thuê đang ở thực tế trong phòng đó.
+* **🔒 Phân hệ Xác thực & Tài khoản (Auth & Users)**: Đăng nhập phân quyền (Admin / Tenant). Tự động chặn truy cập trái phép bằng JWT. Khả năng cấp tài khoản kèm Số điện thoại cho khách thuê trực tiếp từ giao diện Admin.
+* **🏠 Phân hệ Quản lý Phòng trọ (Rooms)**: Theo dõi thông tin chi tiết các phòng trọ, số tầng, diện tích, giá phòng, trạng thái phòng (`Trống`, `Đang thuê`, `Bảo trì`). Chặn xóa phòng nếu đang có người thuê.
+* **👥 Phân hệ Quản lý Khách thuê (Tenants)**: Lưu trữ hồ sơ thông tin cá nhân khách thuê (Họ tên, SĐT, CCCD, Email). Admin có thể chọn nhanh khách đã có tài khoản để gán vào phòng trọ.
+* **⚡ Phân hệ Chỉ số Điện nước (Meter Readings)**: Ghi nhận lịch sử điện nước tiêu thụ thực tế hàng tháng của từng phòng. Hệ thống tự động ràng buộc chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ để tránh số âm.
+* **🧾 Phân hệ Quản lý Hóa đơn (Invoices)**: Lập phiếu thu tự động. Hỗ trợ **xuất mã qr** (chuẩn UTF-8 không lỗi font). Tích hợp **Webhook SePay** tự động xác nhận đã thanh toán khi khách chuyển khoản.
+* **💬 Trung tâm Thông báo (Notification & Feedback Center)**: Admin gửi thông báo cho Tất cả hoặc 1 Khách thuê cụ thể. Khách thuê nhận tin nhắn tự động theo thời gian thực (Polling 10s) và có thể Chat / Phản hồi 2 chiều với Admin.
+* **🛠️ Phân hệ Báo hỏng & Sửa chữa (Repair Requests)**: Tiếp nhận sự cố dịch vụ từ khách thuê. Admin có thể cập nhật trạng thái xử lý (Mới -> Đang xử lý -> Hoàn thành) và phản hồi lại cho khách.
 
 ---
 
 ## 2. Công Nghệ Áp Dụng (Tech Stack)
 
-* **Client**: ReactJS v18+, Vite, TypeScript, Lucide Icons, Vanilla CSS.
-* **Server**: Node.js v20+, Express framework.
-* **Database**: SQLite3 (sử dụng thư viện `sqlite3` kết nối trực tiếp nhẹ nhàng, lưu trữ tại `server/csdl_hostelmate.sqlite`).
-* **Quality Assurance / Testing**:
-  - **Jest & Supertest**: Chạy 40 unit tests kiểm thử API tự động trên bộ nhớ (:memory:), cô lập hoàn toàn.
-  - **ESLint**: Quét tĩnh toàn bộ dự án, đồng bộ hóa quy tắc viết code trên cả frontend và backend.
-* **DevOps**: GitHub Actions (Tự động chạy CI kiểm thử và rà soát độ phủ mã nguồn tối thiểu 70% mỗi khi Push hoặc PR).
+* **Client**: ReactJS v18+, Vite, TypeScript, TailwindCSS, Lucide Icons.
+* **Server**: Node.js v20+, Express framework, JWT Authentication.
+* **Database**: SQLite3 (lưu trữ nhẹ nhàng tại `server/csdl_hostelmate.sqlite`).
+* **Tính năng Realtime**: Sử dụng Long-polling/Interval polling 10s đảm bảo cập nhật thông báo và hóa đơn cho Khách thuê không bị trễ.
 
 ---
 
 ## 3. Cấu Trúc Thư Mục Dự Án
 
+Cấu trúc thư mục được chia thành hai phần chính biệt lập: **Frontend (React/Vite)** và **Backend (Node.js/Express)**.
+
+### A. Phân Tích Backend (`/server`)
+
+Thư mục `server` chứa toàn bộ mã nguồn xử lý logic nghiệp vụ, kết nối cơ sở dữ liệu và cung cấp RESTful APIs. 
+
 ```text
-HostelMate/
-├── .github/
-│   └── workflows/
-│       └── ci.yml               # Cấu hình GitHub Actions CI chạy tự động
-├── server/
-│   ├── tests/
-│   │   └── server.test.js       # Bộ 40 unit test cases backend
-│   ├── csdl_hostelmate.sqlite   # Cơ sở dữ liệu SQLite chính của ứng dụng
-│   ├── db.js                    # Kết nối database, tạo bảng và seed dữ liệu mẫu
-│   ├── eslint.config.js         # Cấu hình quy tắc kiểm tra code style backend
-│   ├── jest.config.js           # Cấu hình Jest test và ngưỡng coverage tối thiểu 70%
-│   ├── package.json             # Khai báo thư viện phụ thuộc và script test backend
-│   └── server.js                # Khởi tạo API server Express
-├── src/                         # Mã nguồn giao diện người dùng (React Frontend)
-│   ├── components/              # Các UI components dùng chung
-│   ├── pages/                   # Các trang giao diện (Rooms, Tenants, Invoices...)
-│   └── App.tsx                  # Khởi chạy giao diện chính
-├── package.json                 # Cấu hình package và script khởi chạy toàn hệ thống
-├── eslint.config.js             # Cấu hình quy tắc linter của root và frontend
-├── SDLC.md                      # Tài liệu quy trình DoD, Git workflow, commit convention
-├── mau_import_phong.csv         # File mẫu Excel/CSV danh sách phòng trọ
-├── mau_import_khach_thue.csv    # File mẫu Excel/CSV danh sách khách thuê
-├── tong_hop_excel_test_backend.csv  # Báo cáo Excel kết quả kiểm thử backend
-├── file_test_case_nghiep_vu.csv # Bảng thiết kế Test Case nghiệp vụ điện nước chuẩn mẫu
-└── README.md                    # Tài liệu hướng dẫn sử dụng và giới thiệu tổng quan
+server/
+├── migrations/                # Thư mục chứa các kịch bản cập nhật CSDL (001_initial_schema.sql, 005_notifications.sql...)
+├── src/                       # Chứa các Module mở rộng (Ví dụ: tính năng AI - ai.routes.js, controllers, services...)
+├── csdl_hostelmate.sqlite     # File cơ sở dữ liệu SQLite chính của hệ thống. 
+├── db.js                      # Cấu hình kết nối Database và tự động chạy file migrations.
+├── server.js                  # FILE CỐT LÕI (Core Entry). Định nghĩa toàn bộ Router (Express App), JWT, Cronjobs.
+├── package.json               # Khai báo dependencies của Backend.
+├── tests/                     # Chứa bộ Unit Test chạy trên bộ nhớ ảo.
+└── (Các file kịch bản JS)     # fix_admin.js, migrate_ids.js, update_db_ai.cjs... (Dùng cho bảo trì CSDL)
+```
+
+### B. Phân Tích Frontend (`/src`)
+
+Thư mục `src` chứa mã nguồn giao diện người dùng, sử dụng **React (TypeScript)**, giao diện **TailwindCSS**, và bundled bằng **Vite**.
+
+```text
+src/
+├── App.tsx                    # File Root Component định tuyến (Routing) và quản lý State phân quyền.
+├── main.tsx                   # Điểm khởi chạy của React DOM.
+├── lib/                       # Chứa thư viện & cấu hình tiện ích
+│   └── api.ts                 # Định nghĩa toàn bộ hàm gọi API kết nối tới Backend.
+├── context/                   # Chứa React Context (Quản lý State toàn cục)
+│   └── AuthContext.tsx        # Cung cấp trạng thái Đăng nhập, thông tin User.
+├── components/                # Chứa các UI Components có thể tái sử dụng
+│   ├── RoommateRequestModal.tsx
+│   └── ui/                    # (AiChatbot, Button, Input, Modal, Sidebar, ProfileModal...)
+├── pages/                     # Chứa giao diện (Views) của từng trang (Phân chia Admin và Tenant)
+│   ├── (Admin Pages)
+│   │   ├── Dashboard, Rooms, Tenants, UserManagement, Invoices, MeterReadings, Repairs, NotificationsAdmin
+│   ├── (Tenant Pages)
+│   │   ├── TenantDashboard, NotificationsTenant
+│   └── (Chung)
+│       └── Login, MockPaymentGateway
+└── types/                     # Định nghĩa TypeScript Interfaces (Models: Room, Tenant, Invoice...)
 ```
 
 ---
@@ -65,7 +77,7 @@ HostelMate/
 ## 4. Hướng Dẫn Cài Đặt & Khởi Chạy Cục Bộ
 
 ### Bước 1: Khai báo Node.js Portable vào PATH (Dành cho máy chạy Windows)
-Mở PowerShell tại thư mục `HostelMate` và thiết lập biến môi trường để sử dụng đúng bộ Node chạy di động được tích hợp:
+Mở PowerShell tại thư mục `HostelMate` và thiết lập biến môi trường để sử dụng đúng bộ Node chạy di động được tích hợp (nếu máy chưa có cài Node):
 
 ```powershell
 $env:PATH = "e:\Quan Li Phong Tro\HostelMate\.node-portable;" + $env:PATH
@@ -73,10 +85,10 @@ $env:PATH = "e:\Quan Li Phong Tro\HostelMate\.node-portable;" + $env:PATH
 
 ### Bước 2: Cài đặt Dependencies
 ```powershell
-# Cài đặt thư viện của root và frontend
+# Cài đặt thư viện của Root (chứa React)
 npm install
 
-# Cài đặt thư viện của backend server
+# Cài đặt thư viện của Backend Server
 npm --prefix server install
 ```
 
@@ -85,32 +97,20 @@ npm --prefix server install
 npm run dev:all
 ```
 Lệnh trên sẽ chạy song song cả client và server:
-* **Giao diện Client**: [http://localhost:5174](http://localhost:5174)
+* **Giao diện Web**: [http://localhost:5174](http://localhost:5174)
 * **Backend API**: [http://localhost:5000](http://localhost:5000)
 
----
-
-## 5. Hướng Dẫn Chạy Kiểm Thử & Kiểm Code Style
-
-Đảm bảo mã nguồn của bạn sạch đẹp và vượt qua tất cả các bài test trước khi đẩy lên GitHub:
-
-### A. Kiểm tra Code Style (Linter)
-```powershell
-npm run lint
-```
-*Yêu cầu nghiệm thu: Trả về thành công, không phát hiện lỗi cú pháp.*
-
-### B. Chạy Unit Test Backend & In Báo Cáo Coverage
-```powershell
-npm run test:server
-```
-*Yêu cầu nghiệm thu: Vượt qua đầy đủ 40/40 test cases, độ phủ code (Coverage) hiển thị trên console phải đạt tối thiểu **70%** (Hiện tại đang đạt **84.81%**).*
+*Lưu ý: Nếu port 5174 bị chiếm, Vite có thể tự nhảy sang 5175, hãy xem log Terminal.*
 
 ---
 
-## 6. Tiêu Chuẩn Phát Triển (SDLC)
-Chi tiết xem tại tài liệu **[SDLC.md](file:///e:/Quan%20Li%20Phong%20Tro/HostelMate/SDLC.md)**, lưu ý 3 điểm chính:
-1. **Git Workflow**: Chỉ merge code qua Pull Request vào các nhánh `develop` và `main` sau khi CI báo xanh.
-2. **Commit Convention**: Commit bắt buộc theo chuẩn Angular (ví dụ: `feat(rooms): ...`, `fix(invoices): ...`).
-3. **Definition of Done**: Một tính năng chỉ hoàn thành khi code sạch linter, test pass, coverage >= 70%, và chạy CI thành công.
+## 5. Tài khoản Đăng nhập Test
 
+Lần đầu chạy hệ thống chưa có Admin, bạn hãy bấm vào **"Chưa có tài khoản? Khởi tạo Admin đầu tiên"** ngoài màn hình Login để tạo Admin.
+
+Sau đó, truy cập bằng Admin vào mục **Tài khoản** để cấp phát Account cho Khách thuê.
+
+---
+
+**Đọc thêm tài liệu API:**
+Xem file `API.md` để lấy danh sách đầy đủ toàn bộ Web Endpoints của hệ thống!

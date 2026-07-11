@@ -143,7 +143,7 @@ export const setupContracts = (app, queryAll, queryOne, run) => {
       let so_nguoi_o = 0;
 
       if (assignment) {
-        const rawRoom = await queryOne('SELECT * FROM phong WHERE id = ?', [assignment.phong_id]);
+        const rawRoom = await queryOne('SELECT p.*, n.ten_nha_tro as khu_vuc FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.id = ?', [assignment.phong_id]);
         if (rawRoom) {
           room = {
             ...rawRoom,

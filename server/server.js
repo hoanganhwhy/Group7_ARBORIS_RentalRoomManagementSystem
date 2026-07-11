@@ -14,9 +14,30 @@ import { OAuth2Client } from 'google-auth-library';
 import { query, queryOne, run } from './db.js';
 import { setupContracts } from './contracts.js';
 import { setupInvoices } from './invoices.js';
+import aiRoutes from './src/routes/ai.routes.js';
 
 const app = express();
 const port = process.env.PORT || 5000;
+
+// Enable trust proxy because of Cloudflare Tunnel / Ngrok
+app.set('trust proxy', 1);
+
+// Security - Rate Limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15000, // Limit each IP to 15000 requests per `window` (Increased for testing)
+  message: { error: 'Too many requests from this IP, please try again after 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const authLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 1000, // Limit each IP to 1000 create account requests per `window` (Increased for testing)
+  message: { error: 'Quá nhiều yêu cầu tạo tài khoản từ IP này. Vui lòng thử lại sau 1 giờ.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Configure CORS to allow credentials
 app.use(cors({ 
@@ -24,14 +45,20 @@ app.use(cors({
   credentials: true 
 }));
 app.use(express.json());
+
+// Apply general rate limiting to all requests
+app.use(apiLimiter);
 app.use(cookieParser());
+
+// Mount routes
+app.use('/api/ai', aiRoutes);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'hostelmate-super-secret-key-2024';
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID || 'YOUR_GOOGLE_CLIENT_ID');
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 requests per windowMs
+  max: 500, // Limit each IP to 500 requests per windowMs (Increased for testing)
   message: { error: 'Quá nhiều lần thử đăng nhập. Vui lòng thử lại sau 15 phút.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -45,15 +72,28 @@ export const authenticate = async (req, res, next) => {
     
     // Check token_version to ensure token wasn't invalidated
     const user = await queryOne('SELECT token_version FROM users WHERE id = ?', [payload.id]);
-    if (!user || user.token_version !== payload.token_version) {
+    const dbVersion = user ? (user.token_version || 0) : null;
+    
+    if (!user || dbVersion !== payload.token_version) {
       return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn hoặc bị vô hiệu hóa' });
     }
     
     req.user = payload;
     next();
   } catch (err) {
-    res.status(401).json({ error: 'Invalid token' });
+    console.error('Auth Middleware Error:', err);
+    res.status(401).json({ error: err.message || 'Invalid token' });
   }
+};
+
+export const checkRole = (role) => {
+  return (req, res, next) => {
+    if (req.user && req.user.role === role) {
+      next();
+    } else {
+      res.status(403).json({ error: 'Không có quyền truy cập.' });
+    }
+  };
 };
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
@@ -96,43 +136,6 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   }
 });
 
-app.post('/api/auth/register', async (req, res) => {
-  const { username, password, email, phone, full_name } = req.body;
-  try {
-    // 1. Password complexity check
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 6 ký tự.' });
-    }
-
-    // 2. Duplicate check
-    const existing = await queryOne('SELECT id FROM users WHERE username = ? OR email = ? OR phone = ?', [username, email, phone]);
-    if (existing) {
-      return res.status(400).json({ error: 'Tên đăng nhập, email hoặc số điện thoại đã tồn tại.' });
-    }
-
-    const id = generateId();
-    const hash = await bcrypt.hash(password, 10);
-    
-    // GUEST role for non-tenants
-    await run(`
-      INSERT INTO users (id, username, password_hash, role, email, phone, full_name)
-      VALUES (?, ?, ?, 'GUEST', ?, ?, ?)
-    `, [id, username, hash, email, phone, full_name]);
-
-    const token = jwt.sign({ id, role: 'GUEST', token_version: 0 }, JWT_SECRET, { expiresIn: '7d' });
-    
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    res.status(201).json({ user: { id, username, role: 'GUEST', email, phone, full_name } });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 app.post('/api/auth/google-login', async (req, res) => {
   const { token } = req.body;
@@ -219,6 +222,12 @@ const mapRoom = (r) => {
     status: r.trang_thai,
     description: r.mo_ta,
     max_occupants: r.so_nguoi_toi_da,
+    address: r.dia_chi,
+    distance_km: r.khoang_cach_km,
+    air_conditioner: Boolean(r.dieu_hoa),
+    washing_machine: Boolean(r.may_giat),
+    furnished: Boolean(r.noi_that),
+    balcony: Boolean(r.ban_cong),
     created_at: r.ngay_tao,
     updated_at: r.ngay_cap_nhat
   };
@@ -385,7 +394,7 @@ app.put('/api/auth/me', authenticate, async (req, res) => {
 // ----------------- ROOMS API -----------------
 app.get('/api/rooms', async (req, res) => {
   try {
-    const rooms = await query('SELECT * FROM phong ORDER BY so_phong');
+    const rooms = await query('SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id ORDER BY p.so_phong');
     
     // Fetch all active assignments for mapping
     const assignments = await query(`
@@ -447,7 +456,7 @@ app.get('/api/rooms', async (req, res) => {
 
 app.get('/api/rooms/:id', async (req, res) => {
   try {
-    const room = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
+    const room = await queryOne('SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.id = ?', [req.params.id]);
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
     }
@@ -514,14 +523,17 @@ app.post('/api/rooms', async (req, res) => {
         id = `${prefix}${String(num).padStart(5, '0')}`;
       }
     }
-    const { area = 'Khu A', room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2 } = req.body;
+    const { 
+      area = 'Khu A', room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2,
+      address = '', distance_km = 0, air_conditioner = false, washing_machine = false, furnished = false, balcony = false
+    } = req.body;
     
     await run(`
-      INSERT INTO phong (id, khu_vuc, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, area, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants]);
+      INSERT INTO phong (id, nha_tro_id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da, dieu_hoa, may_giat, noi_that, ban_cong)
+      VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants, air_conditioner ? 1 : 0, washing_machine ? 1 : 0, furnished ? 1 : 0, balcony ? 1 : 0]);
 
-    const room = await queryOne('SELECT * FROM phong WHERE id = ?', [id]);
+    const room = await queryOne('SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.id = ?', [id]);
     res.status(201).json(mapRoom(room));
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -530,7 +542,10 @@ app.post('/api/rooms', async (req, res) => {
 
 app.put('/api/rooms/:id', async (req, res) => {
   try {
-    const { area, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants } = req.body;
+    const { 
+      area, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants,
+      address, distance_km, air_conditioner, washing_machine, furnished, balcony
+    } = req.body;
     
     const existing = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
     if (!existing) {
@@ -546,15 +561,19 @@ app.put('/api/rooms/:id', async (req, res) => {
       trang_thai: status !== undefined ? status : existing.trang_thai,
       mo_ta: description !== undefined ? description : existing.mo_ta,
       so_nguoi_toi_da: max_occupants !== undefined ? max_occupants : existing.so_nguoi_toi_da,
+      dieu_hoa: air_conditioner !== undefined ? (air_conditioner ? 1 : 0) : existing.dieu_hoa,
+      may_giat: washing_machine !== undefined ? (washing_machine ? 1 : 0) : existing.may_giat,
+      noi_that: furnished !== undefined ? (furnished ? 1 : 0) : existing.noi_that,
+      ban_cong: balcony !== undefined ? (balcony ? 1 : 0) : existing.ban_cong
     };
 
     await run(`
       UPDATE phong 
-      SET khu_vuc = ?, so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      SET so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, dieu_hoa = ?, may_giat = ?, noi_that = ?, ban_cong = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [updated.khu_vuc, updated.so_phong, updated.tang, updated.dien_tich, updated.gia_phong, updated.trang_thai, updated.mo_ta, updated.so_nguoi_toi_da, req.params.id]);
+    `, [updated.so_phong, updated.tang, updated.dien_tich, updated.gia_phong, updated.trang_thai, updated.mo_ta, updated.so_nguoi_toi_da, updated.dieu_hoa, updated.may_giat, updated.noi_that, updated.ban_cong, req.params.id]);
 
-    const room = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
+    const room = await queryOne('SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.id = ?', [req.params.id]);
     res.json(mapRoom(room));
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -573,6 +592,58 @@ app.delete('/api/rooms/:id', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ----------------- USERS API -----------------
+app.get('/api/admin/users', authenticate, checkRole('ADMIN'), async (req, res) => {
+  try {
+    const users = await query("SELECT id, username, email, phone, full_name, role, tenant_id, created_at FROM users WHERE role != 'ADMIN' ORDER BY created_at DESC");
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/admin/users', authenticate, checkRole('ADMIN'), async (req, res) => {
+  const { username, password, full_name, phone } = req.body;
+  const nameToUse = full_name?.trim() || 'Chưa cập nhật';
+  const phoneToUse = phone?.trim() || '';
+  
+  try {
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Thiếu thông tin bắt buộc.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 6 ký tự.' });
+    }
+
+    const existingUser = await queryOne('SELECT id FROM users WHERE username = ?', [username]);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Tên đăng nhập đã tồn tại.' });
+    }
+
+    // Generate a new tenant record automatically
+    const tenantId = await generatePrefixedIdDB('khach_thue', 'KT');
+    await run(`
+      INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email)
+      VALUES (?, ?, ?, '')
+    `, [tenantId, nameToUse, phoneToUse]);
+
+    const id = generateId();
+    const hash = await bcrypt.hash(password, 10);
+    
+    await run(`
+      INSERT INTO users (id, username, password_hash, role, tenant_id, full_name, phone, email)
+      VALUES (?, ?, ?, 'TENANT', ?, ?, ?, '')
+    `, [id, username, hash, tenantId, nameToUse, phoneToUse]);
+
+    res.json({ success: true, message: 'Tạo tài khoản thành công.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------- AI CHATBOT API -----------------
+// Has been moved to src/routes/ai.routes.js
 
 
 // ----------------- TENANTS API -----------------
@@ -967,11 +1038,12 @@ app.get('/api/invoices', async (req, res) => {
   try {
     const data = await query(`
       SELECT i.*, 
-             r.so_phong, r.khu_vuc, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
+             r.so_phong, n.ten_nha_tro as khu_vuc, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
              t.ho_ten, t.so_dien_thoai, t.email, t.so_cccd, t.ngay_sinh, t.dia_chi, t.lien_he_khan_cap, t.ghi_chu as ghi_chu_khach,
              mr.ngay_ghi_so, mr.so_dien_cu, mr.so_dien_moi, mr.so_nuoc_cu, mr.so_nuoc_moi, mr.don_gia_dien, mr.don_gia_nuoc
       FROM hoa_don i
       JOIN phong r ON i.phong_id = r.id
+      LEFT JOIN nha_tro n ON r.nha_tro_id = n.id
       LEFT JOIN khach_thue t ON i.khach_thue_id = t.id
       LEFT JOIN chi_so_dien_nuoc mr ON i.chi_so_dien_nuoc_id = mr.id
       ORDER BY i.created_at DESC
@@ -1049,11 +1121,12 @@ app.get('/api/invoices/:id', async (req, res) => {
   try {
     const item = await queryOne(`
       SELECT i.*, 
-             r.so_phong, r.khu_vuc, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
+             r.so_phong, n.ten_nha_tro as khu_vuc, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
              t.ho_ten, t.so_dien_thoai, t.email, t.so_cccd, t.ngay_sinh, t.dia_chi, t.lien_he_khan_cap, t.ghi_chu as ghi_chu_khach,
              mr.ngay_ghi_so, mr.so_dien_cu, mr.so_dien_moi, mr.so_nuoc_cu, mr.so_nuoc_moi, mr.don_gia_dien, mr.don_gia_nuoc
       FROM hoa_don i
       JOIN phong r ON i.phong_id = r.id
+      LEFT JOIN nha_tro n ON r.nha_tro_id = n.id
       LEFT JOIN khach_thue t ON i.khach_thue_id = t.id
       LEFT JOIN chi_so_dien_nuoc mr ON i.chi_so_dien_nuoc_id = mr.id
       WHERE i.id = ?
@@ -1485,7 +1558,8 @@ app.post('/api/webhooks/sepay', async (req, res) => {
   const { id, accountNumber, content, transferType, transferAmount, referenceCode } = req.body;
 
   if (!id || !Number.isFinite(Number(transferAmount))) {
-    return res.status(400).json({ success: false, message: "Dữ liệu webhook không hợp lệ" });
+    console.log("SEPAY WEBHOOK FAIL 400. Body:", req.body);
+    return res.status(400).json({ success: false, message: "Dữ liệu webhook không hợp lệ", body: req.body });
   }
 
   if (transferType !== "in") {
@@ -1535,6 +1609,135 @@ app.post('/api/webhooks/sepay', async (req, res) => {
   } catch (error) {
     console.error('SePay Webhook Error:', error);
     return res.status(500).json({ success: false });
+  }
+});
+
+// ----------------- NOTIFICATIONS API -----------------
+
+app.post('/api/notifications', authenticate, checkRole('ADMIN'), async (req, res) => {
+  const { title, content, targetType, targetTenantId } = req.body;
+  try {
+    if (!title || !content || !targetType) {
+      return res.status(400).json({ error: 'Thiếu thông tin bắt buộc' });
+    }
+
+    const result = await run(`
+      INSERT INTO notifications (sender_id, title, content, target_type, target_tenant_id)
+      VALUES (?, ?, ?, ?, ?)
+    `, [req.user.id, title, content, targetType, targetTenantId || null]);
+
+    const notificationId = result.lastID;
+
+    // Create recipients
+    if (targetType === 'all') {
+      const tenants = await query("SELECT id FROM khach_thue WHERE ho_ten != 'Chưa cập nhật' OR ho_ten IS NOT NULL");
+      for (const t of tenants) {
+        await run('INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)', [notificationId, t.id]);
+      }
+    } else if (targetType === 'personal' && targetTenantId) {
+      await run('INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)', [notificationId, targetTenantId]);
+    }
+
+    res.json({ success: true, notificationId });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/notifications/my', authenticate, async (req, res) => {
+  try {
+    if (req.user.role === 'ADMIN') {
+      // Admin sees all sent notifications with stats
+      const notifs = await query(`
+        SELECT n.*, 
+          (SELECT COUNT(*) FROM notification_recipients nr WHERE nr.notification_id = n.id) as total_recipients,
+          (SELECT COUNT(*) FROM notification_recipients nr WHERE nr.notification_id = n.id AND nr.is_read = 1) as read_count,
+          (SELECT COUNT(*) FROM notification_replies nrep WHERE nrep.notification_id = n.id) as reply_count
+        FROM notifications n 
+        ORDER BY n.created_at DESC
+      `);
+      res.json(notifs);
+    } else {
+      // Tenant sees notifications sent to them
+      if (!req.user.tenant_id) return res.json([]);
+      const notifs = await query(`
+        SELECT n.*, nr.is_read, nr.read_at,
+          (SELECT COUNT(*) FROM notification_replies nrep WHERE nrep.notification_id = n.id) as reply_count
+        FROM notifications n
+        JOIN notification_recipients nr ON n.id = nr.notification_id
+        WHERE nr.tenant_id = ?
+        ORDER BY n.created_at DESC
+      `, [req.user.tenant_id]);
+      res.json(notifs);
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/notifications/:id', authenticate, async (req, res) => {
+  try {
+    const notif = await queryOne('SELECT * FROM notifications WHERE id = ?', [req.params.id]);
+    if (!notif) return res.status(404).json({ error: 'Không tìm thấy thông báo' });
+
+    // Access control
+    if (req.user.role !== 'ADMIN') {
+      const recipient = await queryOne('SELECT * FROM notification_recipients WHERE notification_id = ? AND tenant_id = ?', [req.params.id, req.user.tenant_id]);
+      if (!recipient) return res.status(403).json({ error: 'Không có quyền truy cập' });
+    }
+
+    const replies = await query('SELECT * FROM notification_replies WHERE notification_id = ? ORDER BY created_at ASC', [req.params.id]);
+    
+    // For admin, fetch read status of recipients
+    let recipients = [];
+    if (req.user.role === 'ADMIN') {
+      recipients = await query(`
+        SELECT nr.*, t.ho_ten, t.so_dien_thoai
+        FROM notification_recipients nr
+        JOIN khach_thue t ON nr.tenant_id = t.id
+        WHERE nr.notification_id = ?
+      `, [req.params.id]);
+    }
+
+    res.json({ notification: notif, replies, recipients });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/notifications/:id/read', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'ADMIN' && req.user.tenant_id) {
+      await run('UPDATE notification_recipients SET is_read = 1, read_at = CURRENT_TIMESTAMP WHERE notification_id = ? AND tenant_id = ? AND is_read = 0', [req.params.id, req.user.tenant_id]);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/notifications/:id/replies', authenticate, async (req, res) => {
+  const { content } = req.body;
+  if (!content) return res.status(400).json({ error: 'Nội dung không được để trống' });
+
+  try {
+    // Basic verification
+    const notif = await queryOne('SELECT * FROM notifications WHERE id = ?', [req.params.id]);
+    if (!notif) return res.status(404).json({ error: 'Không tìm thấy thông báo' });
+
+    if (req.user.role !== 'ADMIN') {
+      const recipient = await queryOne('SELECT * FROM notification_recipients WHERE notification_id = ? AND tenant_id = ?', [req.params.id, req.user.tenant_id]);
+      if (!recipient) return res.status(403).json({ error: 'Không có quyền truy cập' });
+    }
+
+    await run(`
+      INSERT INTO notification_replies (notification_id, sender_user_id, sender_role, content)
+      VALUES (?, ?, ?, ?)
+    `, [req.params.id, req.user.id, req.user.role.toLowerCase(), content]);
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 

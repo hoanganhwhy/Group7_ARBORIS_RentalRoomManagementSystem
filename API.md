@@ -4,90 +4,130 @@ Tài liệu này tổng hợp toàn bộ các API Endpoints được xây dựng
 
 * **Base URL**: `http://localhost:5000`
 * **Định dạng dữ liệu gửi nhận**: `JSON`
+* **Xác thực**: Một số API yêu cầu JWT Header (`Authorization: Bearer <token>`).
 
 ---
 
-## 1. Phân hệ Quản lý Phòng trọ (Rooms API)
+## 1. Phân hệ Xác thực & Người dùng (Auth API)
+
+| Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/auth/login` | Đăng nhập hệ thống (Admin/Tenant) | `{ username, password }` |
+| `POST` | `/api/auth/logout` | Đăng xuất (xóa cookie nếu có) | Không |
+| `GET` | `/api/auth/me` | Lấy thông tin phiên đăng nhập hiện tại | Yêu cầu `Bearer Token` |
+| `PUT` | `/api/auth/me` | Đổi mật khẩu hoặc cập nhật thông tin cá nhân | `{ currentPassword, newPassword, fullName }` |
+| `GET` | `/api/admin/users` | (Admin) Lấy danh sách tài khoản hệ thống | Không |
+| `POST` | `/api/admin/users` | (Admin) Tạo tài khoản mới (cấp cho Khách thuê) | `{ username, password, full_name, phone }` |
+
+---
+
+## 2. Phân hệ Quản lý Phòng trọ (Rooms API)
 
 Quản lý thông tin chi tiết các phòng trọ, trạng thái thuê và sức chứa của phòng.
 
 | Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/rooms` | Lấy danh sách tất cả phòng trọ kèm thông tin khách thuê và hợp đồng đang hoạt động | Không |
-| `GET` | `/api/rooms/:id` | Lấy thông tin chi tiết một phòng trọ cụ thể | `id` của phòng trên URL |
+| `GET` | `/api/rooms` | Lấy danh sách tất cả phòng trọ kèm thông tin khách thuê | Không |
+| `GET` | `/api/rooms/:id` | Lấy thông tin chi tiết một phòng trọ cụ thể | `id` của phòng |
 | `POST` | `/api/rooms` | Thêm phòng trọ mới | `{ room_number, floor, area_sqm, monthly_rent, status, description, max_occupants }` |
 | `PUT` | `/api/rooms/:id` | Cập nhật thông tin phòng trọ | Các trường cần sửa đổi |
-| `DELETE` | `/api/rooms/:id` | Xóa phòng trọ (tự động xóa hợp đồng liên quan) | `id` của phòng trên URL |
+| `DELETE` | `/api/rooms/:id` | Xóa phòng trọ (kiểm tra ràng buộc hợp đồng) | `id` của phòng |
 
 ---
 
-## 2. Phân hệ Quản lý Khách thuê (Tenants API)
+## 3. Phân hệ Quản lý Khách thuê (Tenants API)
 
-Quản lý thông tin hồ sơ cá nhân của khách hàng đăng ký thuê trọ.
+Lưu trữ hồ sơ cá nhân khách thuê và tự động liên kết với tài khoản hệ thống.
 
 | Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/tenants` | Lấy danh sách tất cả khách thuê trọ | Không |
-| `GET` | `/api/tenants/:id` | Lấy chi tiết thông tin một khách thuê | `id` của khách trên URL |
-| `POST` | `/api/tenants` | Đăng ký thông tin khách thuê mới | `{ full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes }` |
+| `GET` | `/api/tenants/:id` | Lấy chi tiết thông tin một khách thuê | `id` khách thuê |
+| `POST` | `/api/tenants` | Thêm mới khách thuê (Tự động cấp mã KT) | `{ ho_ten, so_dien_thoai, email, cccd, ngay_sinh, que_quan, nguoi_lien_he_khan_cap, ghi_chu }` |
 | `PUT` | `/api/tenants/:id` | Chỉnh sửa thông tin khách thuê | Các trường cần sửa đổi |
-| `DELETE` | `/api/tenants/:id` | Xóa hồ sơ khách thuê | `id` của khách trên URL |
+| `DELETE` | `/api/tenants/:id` | Xóa hồ sơ khách thuê | `id` khách thuê |
 
 ---
 
-## 3. Phân hệ Quản lý Hợp đồng & Thuê phòng (Room Assignments API)
+## 4. Phân hệ Hợp đồng & Thuê phòng (Assignments API)
 
-Xử lý nghiệp vụ nhận phòng, trả phòng, thay đổi khách thuê đại diện và kiểm tra thời hạn hợp đồng.
+Xử lý nghiệp vụ nhận phòng, trả phòng, đại diện phòng.
 
 | Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/api/room_assignments` | **Gán khách thuê vào phòng** (Tạo hợp đồng). Tự động kiểm tra sức chứa phòng và trạng thái bảo trì. | `{ room_id, tenant_id, start_date, deposit_amount, is_primary, notes, contract_end_date }` |
-| `PUT` | `/api/room_assignments/:id/primary` | Thay đổi người đại diện phòng (khách thuê chính) | `{ room_id }` |
-| `POST` | `/api/room_assignments/:id/end` | **Thanh lý hợp đồng** (Khách thuê trả phòng rời đi). Tự động chuyển phòng về trạng thái "Trống" nếu không còn ai ở. | Không |
-| `PUT` | `/api/room_assignments/:id/extend` | Gia hạn thời hạn hợp đồng thuê phòng | `{ contract_end_date }` |
-| `GET` | `/api/room_assignments/expiring` | Lấy danh sách hợp đồng sắp hết hạn | Query param: `?withinDays=30` (Mặc định 30 ngày) |
+| `POST` | `/api/room_assignments` | **Gán phòng** (Tạo hợp đồng thuê mới) | `{ room_id, tenant_id, start_date, deposit_amount, is_primary, notes, contract_end_date }` |
+| `PUT` | `/api/room_assignments/:id/primary` | Thay đổi người đại diện phòng (trưởng phòng) | `{ room_id }` |
+| `POST` | `/api/room_assignments/:id/end` | **Thanh lý hợp đồng** (Khách rời đi) | Không |
+| `PUT` | `/api/room_assignments/:id/extend` | Gia hạn thời gian thuê phòng | `{ contract_end_date }` |
+| `GET` | `/api/room_assignments/expiring` | Lấy danh sách hợp đồng sắp hết hạn | Query `?withinDays=30` |
 
 ---
 
-## 4. Phân hệ Chỉ số Điện nước (Meter Readings API)
+## 5. Phân hệ Chỉ số Điện nước (Meter Readings API)
 
-Lưu trữ số điện, số nước tiêu thụ thực tế của từng phòng để làm căn cứ lập hóa đơn hàng tháng.
+Theo dõi mức tiêu thụ hàng tháng của từng phòng.
 
 | Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/meter_readings` | Lấy toàn bộ lịch sử nhập chỉ số điện nước | Không |
-| `GET` | `/api/meter_readings/room/:roomId` | Lấy lịch sử nhập chỉ số điện nước của riêng 1 phòng | `roomId` trên URL |
-| `GET` | `/api/meter_readings/latest/:roomId` | Lấy chỉ số điện nước mới nhất của 1 phòng (để tính tiền tháng mới) | `roomId` trên URL |
-| `POST` | `/api/meter_readings` | **Nhập chỉ số điện nước mới**. Tự động ràng buộc chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ. | `{ room_id, reading_date, electricity_old, electricity_new, water_old, water_new, electricity_price_per_unit, water_price_per_unit }` |
-| `PUT` | `/api/meter_readings/:id` | Chỉnh sửa chỉ số điện nước đã nhập | Các trường cần sửa đổi |
-| `DELETE` | `/api/meter_readings/:id` | Xóa bản ghi chỉ số | `id` bản ghi trên URL |
+| `GET` | `/api/meter_readings` | Toàn bộ lịch sử chỉ số | Không |
+| `GET` | `/api/meter_readings/room/:roomId` | Lịch sử chỉ số của 1 phòng | `roomId` |
+| `GET` | `/api/meter_readings/latest/:roomId` | Chỉ số mới nhất của 1 phòng | `roomId` |
+| `POST` | `/api/meter_readings` | **Nhập chỉ số mới** (Có kiểm tra số âm) | `{ room_id, reading_date, electricity_new, water_new, ... }` |
+| `PUT` | `/api/meter_readings/:id` | Sửa chỉ số | Các trường cần đổi |
+| `DELETE` | `/api/meter_readings/:id` | Xóa bản ghi chỉ số | `id` bản ghi |
 
 ---
 
-## 5. Phân hệ Quản lý Hóa đơn (Invoices API)
+## 6. Phân hệ Quản lý Hóa đơn & Thanh toán (Invoices API)
 
-Tự động hóa việc lập phiếu thu tiền phòng trọ và dịch vụ, cập nhật trạng thái đóng tiền của phòng trọ.
+Tự động lập phiếu thu, hỗ trợ báo cáo thanh toán và Webhook tự động (SePay).
 
 | Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/invoices` | Danh sách tất cả hóa đơn dịch vụ hàng tháng | Không |
-| `GET` | `/api/invoices/:id` | Chi tiết thông tin một hóa đơn dịch vụ | `id` hóa đơn trên URL |
-| `POST` | `/api/invoices` | **Lập hóa đơn tháng mới** (Tiền phòng + Tiền điện + Tiền nước + Phí khác = Tổng tiền) | `{ room_id, tenant_id, meter_reading_id, invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, total_amount, status, due_date, notes }` |
-| `PUT` | `/api/invoices/:id` | Sửa đổi thông tin hóa đơn | Các trường cần sửa đổi |
-| `DELETE` | `/api/invoices/:id` | Xóa hóa đơn | `id` hóa đơn trên URL |
-| `POST` | `/api/invoices/mark-overdue` | Quét tự động và đánh dấu các hóa đơn quá hạn chưa trả thành "Quá hạn" | Không |
-| `PUT` | `/api/invoices/:id/paid` | **Đánh dấu hóa đơn đã thanh toán** (Tự động cập nhật ngày trả tiền là ngày hôm nay) | Không |
+| `GET` | `/api/invoices` | Lấy tất cả hóa đơn | Không |
+| `GET` | `/api/invoices/export` | **Xuất Excel/CSV** danh sách hóa đơn | Không |
+| `GET` | `/api/invoices/:id` | Chi tiết hóa đơn | `id` hóa đơn |
+| `POST` | `/api/invoices` | **Lập hóa đơn tháng mới** | `{ room_id, tenant_id, invoice_month, invoice_year, total_amount, ... }` |
+| `PUT` | `/api/invoices/:id` | Sửa hóa đơn | Các trường cần đổi |
+| `DELETE` | `/api/invoices/:id` | Xóa hóa đơn | `id` hóa đơn |
+| `POST` | `/api/invoices/mark-overdue` | (Cronjob) Đánh dấu quá hạn các hóa đơn chưa trả | Không |
+| `PUT` | `/api/invoices/:id/paid` | Đánh dấu thủ công đã thanh toán | Không |
+| `POST` | `/api/invoices/:id/report-payment` | Khách thuê báo cáo đã chuyển khoản | Không |
+| `PATCH` | `/api/admin/invoices/:id/confirm-payment`| Admin xác nhận đã nhận tiền | Không |
+| `POST` | `/api/webhooks/sepay` | **Webhook tự động gạch nợ** (Kết nối SePay) | Payload chuẩn SePay |
 
 ---
 
-## 6. Phân hệ Báo hỏng & Sửa chữa (Repair Requests API)
-
-*Giao diện tiếp nhận sự cố dịch vụ theo tư duy ITIL/Service Management.*
+## 7. Phân hệ Báo hỏng & Sửa chữa (Repair Requests API)
 
 | Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/repair_requests` | Danh sách tất cả yêu cầu báo hỏng trong hệ thống | Không |
-| `GET` | `/api/repair_requests/:id` | Chi tiết thông tin yêu cầu báo hỏng cụ thể | `id` yêu cầu trên URL |
-| `POST` | `/api/repair_requests` | **Gửi yêu cầu báo hỏng** (Khách thuê báo hỏng thiết bị phòng) | `{ room_id, tenant_id, title, description, priority }` |
-| `PUT` | `/api/repair_requests/:id` | **Cập nhật tiến độ sửa chữa** (Chủ trọ cập nhật từ Mới tạo -> Đang sửa -> Đã xong kèm ghi chú xử lý) | `{ status, assigned_to, resolution_notes }` |
-| `DELETE` | `/api/repair_requests/:id` | Xóa yêu cầu sửa chữa | `id` yêu cầu trên URL |
+| `GET` | `/api/repair_requests` | Danh sách các yêu cầu sửa chữa | Không |
+| `GET` | `/api/repair_requests/:id` | Chi tiết yêu cầu | `id` yêu cầu |
+| `POST` | `/api/repair_requests` | Tạo yêu cầu báo hỏng mới | `{ room_id, tenant_id, title, description, priority }` |
+| `PUT` | `/api/repair_requests/:id` | Cập nhật tiến độ (Đang xử lý / Đã xong) | `{ status, resolution_notes }` |
+| `DELETE` | `/api/repair_requests/:id` | Xóa yêu cầu | `id` yêu cầu |
+
+---
+
+## 8. Phân hệ Trung tâm Thông báo (Notifications API)
+
+Luồng thông báo và phản hồi 2 chiều giữa Admin và Khách thuê.
+
+| Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/notifications` | (Admin) Gửi thông báo cho Tất cả hoặc Cá nhân | `{ title, content, targetType, targetTenantId }` |
+| `GET` | `/api/notifications/my` | Lấy danh sách thông báo (tự phân quyền Admin/Tenant) | Không |
+| `GET` | `/api/notifications/:id` | Lấy chi tiết thông báo và luồng phản hồi | `id` thông báo |
+| `PATCH` | `/api/notifications/:id/read` | (Tenant) Đánh dấu đã đọc thông báo | Không |
+| `POST` | `/api/notifications/:id/replies`| Gửi phản hồi vào luồng thông báo | `{ content }` |
+
+---
+
+## 9. Phân hệ Cài đặt Hệ thống (Settings API)
+
+| Phương thức | Endpoint | Mô tả chức năng | Body (Yêu cầu) / Params |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/settings` | Lấy các thiết lập hệ thống (Giá điện, Giá nước mặc định, TT Thanh toán) | Không |
+| `PUT` | `/api/settings` | Lưu thay đổi thiết lập hệ thống | `JSON key-value` |
+| `GET` | `/api/landlord/contact` | Lấy thông tin liên hệ của chủ trọ | Không |
