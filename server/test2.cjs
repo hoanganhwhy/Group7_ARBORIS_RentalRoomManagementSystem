@@ -1,0 +1,1 @@
+const sqlite3 = require('sqlite3').verbose(); const db = new sqlite3.Database('./csdl_hostelmate.sqlite'); db.all('SELECT p.khu_vuc as area, hd.khach_thue_id FROM khach_thue k JOIN hop_dong_thue hd ON k.id = hd.khach_thue_id JOIN phong p ON hd.phong_id = p.id WHERE hd.dang_hoat_dong = 1', [], (err, rows) = console.log('Err:', err); console.log('Rows:', rows); });  

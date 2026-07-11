@@ -141,4 +141,4 @@ export interface RoommateRequest {
   so_dien_thoai?: string | null;
 }
 
-export type Page = 'dashboard' | 'rooms' | 'tenants' | 'user-management' | 'meter-readings' | 'invoices' | 'repairs' | 'roommates' | 'notifications';
+export type Page = 'dashboard' | 'rooms' | 'tenants' | 'user-management' | 'meter-readings' | 'invoices' | 'repairs' | 'roommates' | 'notifications' | 'chat';

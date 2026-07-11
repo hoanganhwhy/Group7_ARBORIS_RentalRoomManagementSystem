@@ -12,6 +12,7 @@ import {
   UserPlus,
   HeartHandshake,
   Bell,
+  MessageCircle,
   LogOut as LogOutIcon, // Rename to avoid conflict if needed, but LogOut is fine
 } from 'lucide-react';
 import type { Page } from '../../types';
@@ -35,6 +36,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
       { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
       { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Tin nhắn từ chủ trọ' },
+      { id: 'chat', label: 'Tin nhắn', icon: <MessageCircle className="w-[18px] h-[18px]" />, description: 'Chat với chủ nhà' },
     ];
   } else if (user?.role === 'ADMIN') {
     navItems = [
@@ -46,6 +48,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
       { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
       { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Gửi và phản hồi' },
+      { id: 'chat', label: 'Tin nhắn', icon: <MessageCircle className="w-[18px] h-[18px]" />, description: 'Nhắn tin' },
     ];
   } else {
     navItems = [];

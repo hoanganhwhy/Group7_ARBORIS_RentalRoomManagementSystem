@@ -8,6 +8,7 @@ import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
 export default function NotificationsTenant() {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'main' | 'archive'>('main');
   
   // Detail modal
   const [detailNotif, setDetailNotif] = useState<any>(null);
@@ -23,13 +24,18 @@ export default function NotificationsTenant() {
     }, 10000);
     
     return () => clearInterval(interval);
-  }, []);
+  }, [viewMode]);
 
   async function loadNotifications(showLoading = true) {
     if (showLoading) setLoading(true);
     try {
-      const data = await getNotifications();
-      setNotifications(data);
+      const isArchive = viewMode === 'archive';
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if(res.ok) {
+         setNotifications(await res.json());
+      }
     } catch (error) {
       console.error(error);
     } finally {
@@ -66,6 +72,33 @@ export default function NotificationsTenant() {
     }
   }
 
+  async function handleDelete(e: React.MouseEvent, id: number) {
+    e.stopPropagation();
+    if (!confirm('Xóa thông báo này vào mục lưu trữ?')) return;
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      loadNotifications();
+    } catch (error) {
+      alert('Lỗi khi xóa');
+    }
+  }
+
+  async function handleRestore(e: React.MouseEvent, id: number) {
+    e.stopPropagation();
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}/restore`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      loadNotifications();
+    } catch (error) {
+      alert('Lỗi khi khôi phục');
+    }
+  }
+
   return (
     <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
@@ -79,6 +112,22 @@ export default function NotificationsTenant() {
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-charcoal-100 overflow-hidden">
+        <div className="flex items-center gap-4 border-b border-charcoal-100 px-6 pt-4">
+          <button 
+            onClick={() => setViewMode('main')}
+            className={`pb-3 px-1 font-medium text-sm transition-colors relative ${viewMode === 'main' ? 'text-terra-600' : 'text-charcoal-500 hover:text-charcoal-800'}`}
+          >
+            Hộp thư (Tối đa 99 tin)
+            {viewMode === 'main' && <span className="absolute bottom-0 left-0 w-full h-0.5 bg-terra-500 rounded-t-full"></span>}
+          </button>
+          <button 
+            onClick={() => setViewMode('archive')}
+            className={`pb-3 px-1 font-medium text-sm transition-colors relative ${viewMode === 'archive' ? 'text-terra-600' : 'text-charcoal-500 hover:text-charcoal-800'}`}
+          >
+            Lưu trữ (30 ngày)
+            {viewMode === 'archive' && <span className="absolute bottom-0 left-0 w-full h-0.5 bg-terra-500 rounded-t-full"></span>}
+          </button>
+        </div>
         {loading ? (
           <p className="text-charcoal-500 p-6 text-center">Đang tải thông báo...</p>
         ) : notifications.length === 0 ? (
@@ -107,9 +156,16 @@ export default function NotificationsTenant() {
                     <h3 className={`font-medium truncate ${!n.is_read ? 'text-charcoal-900 font-semibold' : 'text-charcoal-700'}`}>
                       {n.title}
                     </h3>
-                    <span className="text-xs text-charcoal-400 whitespace-nowrap ml-4">
-                      {new Date(n.created_at).toLocaleDateString('vi-VN')}
-                    </span>
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs text-charcoal-400 whitespace-nowrap ml-4">
+                        {new Date(n.created_at).toLocaleDateString('vi-VN')}
+                      </span>
+                      {viewMode === 'main' ? (
+                        <button onClick={(e) => handleDelete(e, n.id)} className="text-xs text-red-500 hover:underline">Xóa</button>
+                      ) : (
+                        <button onClick={(e) => handleRestore(e, n.id)} className="text-xs text-terra-600 hover:underline">Khôi phục</button>
+                      )}
+                    </div>
                   </div>
                   <p className={`text-sm line-clamp-2 ${!n.is_read ? 'text-charcoal-800' : 'text-charcoal-500'}`}>
                     {n.content}

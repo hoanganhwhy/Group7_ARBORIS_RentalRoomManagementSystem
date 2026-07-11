@@ -9,6 +9,7 @@ import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
 export default function NotificationsAdmin() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'personal' | 'all'>('personal');
+  const [viewMode, setViewMode] = useState<'main' | 'archive'>('main');
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -28,10 +29,20 @@ export default function NotificationsAdmin() {
     loadTenants();
   }, []);
 
+  useEffect(() => {
+    loadNotifications();
+  }, [viewMode]);
+
   async function loadNotifications() {
+    setLoading(true);
     try {
-      const data = await getNotifications();
-      setNotifications(data);
+      const isArchive = viewMode === 'archive';
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if(res.ok) {
+         setNotifications(await res.json());
+      }
     } catch (error) {
       console.error(error);
     } finally {
@@ -90,6 +101,33 @@ export default function NotificationsAdmin() {
     }
   }
 
+  async function handleDelete(e: React.MouseEvent, id: number) {
+    e.stopPropagation();
+    if (!confirm('Xóa thông báo này vào mục lưu trữ?')) return;
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      loadNotifications();
+    } catch (error) {
+      alert('Lỗi khi xóa');
+    }
+  }
+
+  async function handleRestore(e: React.MouseEvent, id: number) {
+    e.stopPropagation();
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}/restore`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      loadNotifications();
+    } catch (error) {
+      alert('Lỗi khi khôi phục');
+    }
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -109,7 +147,24 @@ export default function NotificationsAdmin() {
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-charcoal-100 p-6">
-        <h2 className="text-lg font-semibold text-charcoal-900 mb-4">Lịch sử gửi thông báo</h2>
+        <div className="flex items-center justify-between mb-4 border-b border-charcoal-100 pb-2">
+          <div className="flex gap-4">
+            <button 
+              onClick={() => setViewMode('main')}
+              className={`pb-2 px-1 font-medium text-sm transition-colors relative ${viewMode === 'main' ? 'text-terra-600' : 'text-charcoal-500 hover:text-charcoal-800'}`}
+            >
+              Lịch sử gửi (Tối đa 99 tin)
+              {viewMode === 'main' && <span className="absolute bottom-0 left-0 w-full h-0.5 bg-terra-500 rounded-t-full"></span>}
+            </button>
+            <button 
+              onClick={() => setViewMode('archive')}
+              className={`pb-2 px-1 font-medium text-sm transition-colors relative ${viewMode === 'archive' ? 'text-terra-600' : 'text-charcoal-500 hover:text-charcoal-800'}`}
+            >
+              Lưu trữ (30 ngày)
+              {viewMode === 'archive' && <span className="absolute bottom-0 left-0 w-full h-0.5 bg-terra-500 rounded-t-full"></span>}
+            </button>
+          </div>
+        </div>
         
         {loading ? (
           <p className="text-charcoal-500 py-4">Đang tải...</p>
@@ -149,11 +204,16 @@ export default function NotificationsAdmin() {
                     <div className="font-medium text-charcoal-900">{n.read_count} / {n.total_recipients}</div>
                     <div className="text-xs">Đã xem</div>
                   </div>
-                  <div className="text-charcoal-500 text-center min-w-[60px]">
-                    <div className="font-medium text-terra-600 flex items-center justify-center gap-1">
-                      <MessageCircle className="w-4 h-4" /> {n.reply_count}
-                    </div>
+                  <div className="text-charcoal-500 text-center">
+                    <div className="font-medium text-charcoal-900">{n.reply_count}</div>
                     <div className="text-xs">Phản hồi</div>
+                  </div>
+                  <div className="flex flex-col gap-1 border-l pl-4 border-charcoal-100">
+                    {viewMode === 'main' ? (
+                      <button onClick={(e) => handleDelete(e, n.id)} className="text-xs text-red-500 hover:underline px-2 py-1">Xóa</button>
+                    ) : (
+                      <button onClick={(e) => handleRestore(e, n.id)} className="text-xs text-terra-600 hover:underline px-2 py-1">Khôi phục</button>
+                    )}
                   </div>
                 </div>
               </div>

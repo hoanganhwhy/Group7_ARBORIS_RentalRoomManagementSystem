@@ -9,6 +9,10 @@ export const aiTools = [
           type: "NUMBER",
           description: "Mức giá tối đa của phòng."
         },
+        area: {
+          type: "STRING",
+          description: "Khu vực hoặc địa chỉ của nhà trọ (ví dụ: Khu A, Khu B)."
+        },
         airConditioner: {
           type: "BOOLEAN",
           description: "Có điều hòa hay không."
@@ -41,6 +45,10 @@ export const aiTools = [
         roomCode: {
           type: "STRING",
           description: "Mã phòng cần tìm (ví dụ: 101, 202)."
+        },
+        area: {
+          type: "STRING",
+          description: "Khu vực hoặc địa chỉ của nhà trọ (ví dụ: Khu A, Khu B) nếu người dùng có nhắc đến."
         }
       },
       required: ["roomCode"]
@@ -49,6 +57,14 @@ export const aiTools = [
   {
     name: "get_available_rooms",
     description: "Lấy danh sách tất cả các phòng đang trống hiện tại.",
+    parameters: {
+      type: "OBJECT",
+      properties: {}
+    }
+  },
+  {
+    name: "get_all_areas",
+    description: "Lấy danh sách tất cả các khu vực / địa chỉ hiện có trong hệ thống.",
     parameters: {
       type: "OBJECT",
       properties: {}
@@ -103,6 +119,10 @@ export const aiTools = [
         roomCode: {
           type: "STRING",
           description: "Mã phòng cần lấy hóa đơn (ví dụ: 101, 202)."
+        },
+        area: {
+          type: "STRING",
+          description: "Khu vực hoặc địa chỉ của nhà trọ (ví dụ: Khu A, Khu B) nếu người dùng có nhắc đến."
         }
       },
       required: ["roomCode"]
@@ -117,6 +137,10 @@ export const aiTools = [
         roomCode: {
           type: "STRING",
           description: "Mã phòng cần lấy yêu cầu sửa chữa (ví dụ: 101, 202)."
+        },
+        area: {
+          type: "STRING",
+          description: "Khu vực hoặc địa chỉ của nhà trọ (ví dụ: Khu A, Khu B) nếu người dùng có nhắc đến."
         }
       },
       required: ["roomCode"]
@@ -131,6 +155,10 @@ export const aiTools = [
         roomCode: {
           type: "STRING",
           description: "Mã phòng cần lấy thông tin khách thuê (ví dụ: 101, 202)."
+        },
+        area: {
+          type: "STRING",
+          description: "Khu vực hoặc địa chỉ của nhà trọ (ví dụ: Khu A, Khu B) nếu người dùng có nhắc đến."
         }
       },
       required: ["roomCode"]

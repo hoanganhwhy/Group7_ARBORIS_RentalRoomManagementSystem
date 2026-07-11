@@ -25,6 +25,10 @@ const handleToolCall = async (callName, args, user) => {
           conditions.push("p.gia_phong <= ?");
           params.push(args.maxPrice);
         }
+        if (args.area) {
+          conditions.push("n.ten_nha_tro LIKE ?");
+          params.push(`%${args.area}%`);
+        }
         if (args.airConditioner) conditions.push("p.dieu_hoa = 1");
         if (args.washingMachine) conditions.push("p.may_giat = 1");
         if (args.furnished) conditions.push("p.noi_that = 1");
@@ -53,7 +57,15 @@ const handleToolCall = async (callName, args, user) => {
       }
 
       case 'get_room_by_code': {
-        const rooms = await query("SELECT p.id, p.so_phong, p.tang, p.gia_phong, p.trang_thai, p.mo_ta, p.dieu_hoa, p.may_giat, p.noi_that, p.ban_cong, n.dia_chi, n.ten_nha_tro FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.so_phong = ?", [args.roomCode]);
+        const conditions = ["p.so_phong = ?"];
+        const params = [args.roomCode];
+        if (args.area) {
+          conditions.push("n.ten_nha_tro LIKE ?");
+          params.push(`%${args.area}%`);
+        }
+        
+        let sql = "SELECT p.id, p.so_phong, p.tang, p.gia_phong, p.trang_thai, p.mo_ta, p.dieu_hoa, p.may_giat, p.noi_that, p.ban_cong, n.dia_chi, n.ten_nha_tro FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE " + conditions.join(" AND ");
+        const rooms = await query(sql, params);
         if (rooms.length === 0) return { success: false, message: "Không tìm thấy phòng." };
         
         let room = rooms[0];
@@ -63,6 +75,11 @@ const handleToolCall = async (callName, args, user) => {
         }
 
         return { success: true, data: room };
+      }
+
+      case 'get_all_areas': {
+        const areas = await query("SELECT id, ten_nha_tro, dia_chi FROM nha_tro");
+        return { success: true, count: areas.length, data: areas };
       }
 
       case 'get_available_rooms': {
@@ -123,36 +140,57 @@ const handleToolCall = async (callName, args, user) => {
 
       case 'admin_get_room_invoices': {
         if (user.role !== 'ADMIN' && user.role !== 'MANAGER') return { success: false, message: "Không có quyền." };
+        const conditions = ["p.so_phong = ?"];
+        const params = [args.roomCode];
+        if (args.area) {
+          conditions.push("n.ten_nha_tro LIKE ?");
+          params.push(`%${args.area}%`);
+        }
         const invoices = await query(`
           SELECT hd.thang_hoa_don, hd.nam_hoa_don, hd.tien_dien, hd.tien_nuoc, hd.tien_phong, hd.tong_tien, hd.trang_thai, hd.han_thanh_toan
           FROM hoa_don hd
           JOIN phong p ON hd.phong_id = p.id
-          WHERE p.so_phong = ?
+          LEFT JOIN nha_tro n ON p.nha_tro_id = n.id
+          WHERE ${conditions.join(" AND ")}
           ORDER BY hd.nam_hoa_don DESC, hd.thang_hoa_don DESC
           LIMIT 10
-        `, [args.roomCode]);
+        `, params);
         return { success: true, data: invoices };
       }
 
       case 'admin_get_room_repair_requests': {
         if (user.role !== 'ADMIN' && user.role !== 'MANAGER') return { success: false, message: "Không có quyền." };
+        const conditions = ["p.so_phong = ?"];
+        const params = [args.roomCode];
+        if (args.area) {
+          conditions.push("n.ten_nha_tro LIKE ?");
+          params.push(`%${args.area}%`);
+        }
         const requests = await query(`
           SELECT tieu_de, mo_ta, trang_thai, ngay_bao, muc_do_uu_tien
           FROM yeu_cau_sua_chua y
           JOIN phong p ON y.phong_id = p.id
-          WHERE p.so_phong = ?
+          LEFT JOIN nha_tro n ON p.nha_tro_id = n.id
+          WHERE ${conditions.join(" AND ")}
           ORDER BY ngay_bao DESC
           LIMIT 10
-        `, [args.roomCode]);
+        `, params);
         return { success: true, data: requests };
       }
 
       case 'admin_get_room_tenant': {
         if (user.role !== 'ADMIN' && user.role !== 'MANAGER') return { success: false, message: "Không có quyền." };
 
-        const roomCheck = await query("SELECT p.so_phong, n.ten_nha_tro, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.so_phong = ?", [args.roomCode]);
+        const conditions = ["p.so_phong = ?"];
+        const params = [args.roomCode];
+        if (args.area) {
+          conditions.push("n.ten_nha_tro LIKE ?");
+          params.push(`%${args.area}%`);
+        }
+
+        const roomCheck = await query("SELECT p.so_phong, n.ten_nha_tro, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE " + conditions.join(" AND "), params);
         if (roomCheck.length === 0) {
-           return { success: false, message: `Phòng ${args.roomCode} không tồn tại trong hệ thống.` };
+           return { success: false, message: `Phòng ${args.roomCode} không tồn tại trong hệ thống (hoặc không khớp khu vực).` };
         }
 
         const tenants = await query(`
@@ -160,8 +198,9 @@ const handleToolCall = async (callName, args, user) => {
           FROM khach_thue k
           JOIN hop_dong_thue h ON h.khach_thue_id = k.id
           JOIN phong p ON h.phong_id = p.id
-          WHERE p.so_phong = ? AND h.dang_hoat_dong = 1
-        `, [args.roomCode]);
+          LEFT JOIN nha_tro n ON p.nha_tro_id = n.id
+          WHERE ${conditions.join(" AND ")} AND h.dang_hoat_dong = 1
+        `, params);
 
         if (tenants.length === 0) {
            return { success: true, message: `Phòng ${args.roomCode} thuộc ${roomCheck[0].ten_nha_tro} (địa chỉ: ${roomCheck[0].dia_chi}) hiện tại trống, chưa có người thuê.` };

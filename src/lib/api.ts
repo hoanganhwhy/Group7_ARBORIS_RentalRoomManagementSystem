@@ -378,6 +378,46 @@ export async function markNotificationAsRead(id: number): Promise<any> {
     method: 'PATCH'
   });
 }
+
+export async function deleteNotification(id: number): Promise<any> {
+  return request<any>(`/notifications/${id}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function restoreNotification(id: number): Promise<any> {
+  return request<any>(`/notifications/${id}/restore`, {
+    method: 'PATCH'
+  });
+}
+
+// --- CHAT API ---
+export async function getChatMessages(isGroup: boolean, archive: boolean = false, receiverId?: string): Promise<any> {
+  const queryParams = new URLSearchParams();
+  queryParams.append('is_group', isGroup.toString());
+  queryParams.append('archive', archive.toString());
+  if (receiverId) queryParams.append('receiver_id', receiverId);
+  return request<any>(`/chat?${queryParams.toString()}`);
+}
+
+export async function sendChatMessage(content: string, isGroup: boolean, receiverId?: string): Promise<any> {
+  return request<any>('/chat', {
+    method: 'POST',
+    body: JSON.stringify({ content, is_group: isGroup, receiver_id: receiverId })
+  });
+}
+
+export async function deleteChatMessage(id: number): Promise<any> {
+  return request<any>(`/chat/${id}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function restoreChatMessage(id: number): Promise<any> {
+  return request<any>(`/chat/${id}/restore`, {
+    method: 'PATCH'
+  });
+}
 export async function loginUser(data: any): Promise<any> {
   return request<any>('/auth/login', {
     method: 'POST',
@@ -393,7 +433,7 @@ export async function loginGoogle(token: string): Promise<any> {
 }
 
 export async function generateContract(assignmentId: string): Promise<any> {
-  return request<any>(/contracts/ + assignmentId + /generate, {
+  return request<any>(`/contracts/${assignmentId}/generate`, {
     method: 'POST'
   });
 }

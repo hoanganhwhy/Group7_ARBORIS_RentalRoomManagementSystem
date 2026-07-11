@@ -57,7 +57,7 @@ export function Rooms() {
     contract_end_date: '',
   });
   const [formData, setFormData] = useState({
-    area: 'Khu A',
+    area: '',
     room_number: '',
     floor: '' as string | number,
     area_sqm: '' as string | number,
@@ -65,8 +65,6 @@ export function Rooms() {
     max_occupants: '' as string | number,
     status: 'available' as 'available' | 'occupied' | 'maintenance',
     description: '',
-    address: '',
-    distance_km: '' as string | number,
     air_conditioner: false,
     washing_machine: false,
     furnished: false,
@@ -81,6 +79,8 @@ export function Rooms() {
     notes: '',
   });
   const [saving, setSaving] = useState(false);
+  const [showAreaDropdown, setShowAreaDropdown] = useState(false);
+  const availableAreas = Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort();
 
   useEffect(() => { loadData(); }, []);
 
@@ -103,7 +103,7 @@ export function Rooms() {
 
   function openCreateModal() {
     setEditingRoom(null);
-    setFormData({ area: 'Khu A', room_number: '', floor: '', area_sqm: '', monthly_rent: '', max_occupants: '', status: 'available', description: '', address: '', distance_km: '', air_conditioner: false, washing_machine: false, furnished: false, balcony: false });
+    setFormData({ area: '', room_number: '', floor: '', area_sqm: '', monthly_rent: '', max_occupants: '', status: 'available', description: '', air_conditioner: false, washing_machine: false, furnished: false, balcony: false });
     setIsModalOpen(true);
   }
 
@@ -118,8 +118,6 @@ export function Rooms() {
       max_occupants: room.max_occupants || 2,
       status: room.status,
       description: room.description || '',
-      address: room.address || '',
-      distance_km: room.distance_km ?? '',
       air_conditioner: room.air_conditioner || false,
       washing_machine: room.washing_machine || false,
       furnished: room.furnished || false,
@@ -237,7 +235,6 @@ export function Rooms() {
         max_occupants: parseInt(formData.max_occupants as any) || 1,
         area_sqm: parseFloat(formData.area_sqm as any) || 0,
         monthly_rent: parseFloat(formData.monthly_rent as any) || 0,
-        distance_km: parseFloat(formData.distance_km as any) || 0,
       };
       if (editingRoom) {
         await updateRoom(editingRoom.id, payload);
@@ -734,12 +731,35 @@ export function Rooms() {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingRoom ? 'Sửa thông tin phòng' : 'Thêm phòng mới'} size="md">
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 relative">
               <label className="block text-sm font-medium text-charcoal-700">Khu vực / Địa chỉ</label>
-              <input type="text" list="area-list" required className="w-full px-3 py-2 border border-charcoal-200 rounded-lg focus:ring-terra-400 focus:border-terra-400 text-sm" value={formData.area} onChange={(e) => setFormData({ ...formData, area: e.target.value })} placeholder="VD: Khu A, 123 Đường B..." />
-              <datalist id="area-list">
-                {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => <option key={a} value={a} />)}
-              </datalist>
+              <input 
+                type="text" 
+                required 
+                className="w-full px-3 py-2 border border-charcoal-200 rounded-lg focus:ring-terra-400 focus:border-terra-400 text-sm" 
+                value={formData.area} 
+                onChange={(e) => setFormData({ ...formData, area: e.target.value })} 
+                onFocus={() => setShowAreaDropdown(true)}
+                onBlur={() => setTimeout(() => setShowAreaDropdown(false), 200)}
+                placeholder="VD: Khu A, 123 Đường B..." 
+              />
+              {showAreaDropdown && availableAreas.length > 0 && (
+                <div className="absolute z-[100] w-full mt-1 bg-white border border-charcoal-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                  {availableAreas.map(a => (
+                    <div 
+                      key={a} 
+                      className="px-3 py-2 text-sm hover:bg-cream-50 cursor-pointer text-charcoal-800"
+                      onMouseDown={(e) => {
+                        e.preventDefault(); // prevent blur before click
+                        setFormData({ ...formData, area: a });
+                        setShowAreaDropdown(false);
+                      }}
+                    >
+                      {a}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <Input label="Số phòng" name="room_number" value={formData.room_number} onChange={(v) => setFormData({ ...formData, room_number: v })} required placeholder="VD: 101" />
           </div>
@@ -754,10 +774,6 @@ export function Rooms() {
           <Input label="Trạng thái" name="status" type="select" value={formData.status} onChange={(v) => setFormData({ ...formData, status: v as 'available' | 'occupied' | 'maintenance' })}
             options={[{ value: 'available', label: 'Trống' }, { value: 'occupied', label: 'Đang thuê' }, { value: 'maintenance', label: 'Bảo trì' }]} />
           
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Địa chỉ cụ thể" name="address" type="text" value={formData.address} onChange={(v) => setFormData({ ...formData, address: v })} placeholder="VD: 123 Đường A, Quận B" />
-            <Input label="Khoảng cách đến ĐH (km)" name="distance_km" type="number" value={formData.distance_km} onChange={(v) => setFormData({ ...formData, distance_km: v })} min={0} step={0.1} />
-          </div>
 
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-charcoal-700">Tiện ích AI tìm kiếm</label>

@@ -525,13 +525,24 @@ app.post('/api/rooms', async (req, res) => {
     }
     const { 
       area = 'Khu A', room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2,
-      address = '', distance_km = 0, air_conditioner = false, washing_machine = false, furnished = false, balcony = false
+      air_conditioner = false, washing_machine = false, furnished = false, balcony = false
     } = req.body;
     
+    // Tìm hoặc tạo nhà trọ mới dựa trên khu vực (area)
+    let nha_tro = await queryOne('SELECT id FROM nha_tro WHERE ten_nha_tro = ?', [area]);
+    let nha_tro_id = 1;
+    if (nha_tro) {
+      nha_tro_id = nha_tro.id;
+    } else {
+      await run('INSERT INTO nha_tro (ten_nha_tro, dia_chi) VALUES (?, ?)', [area, area]);
+      const newNhaTro = await queryOne('SELECT id FROM nha_tro WHERE ten_nha_tro = ?', [area]);
+      if (newNhaTro) nha_tro_id = newNhaTro.id;
+    }
+
     await run(`
       INSERT INTO phong (id, nha_tro_id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da, dieu_hoa, may_giat, noi_that, ban_cong)
-      VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants, air_conditioner ? 1 : 0, washing_machine ? 1 : 0, furnished ? 1 : 0, balcony ? 1 : 0]);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, nha_tro_id, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants, air_conditioner ? 1 : 0, washing_machine ? 1 : 0, furnished ? 1 : 0, balcony ? 1 : 0]);
 
     const room = await queryOne('SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.id = ?', [id]);
     res.status(201).json(mapRoom(room));
@@ -558,20 +569,40 @@ app.put('/api/rooms/:id', async (req, res) => {
       tang: floor !== undefined ? floor : existing.tang,
       dien_tich: area_sqm !== undefined ? area_sqm : existing.dien_tich,
       gia_phong: monthly_rent !== undefined ? monthly_rent : existing.gia_phong,
-      trang_thai: status !== undefined ? status : existing.trang_thai,
-      mo_ta: description !== undefined ? description : existing.mo_ta,
-      so_nguoi_toi_da: max_occupants !== undefined ? max_occupants : existing.so_nguoi_toi_da,
-      dieu_hoa: air_conditioner !== undefined ? (air_conditioner ? 1 : 0) : existing.dieu_hoa,
-      may_giat: washing_machine !== undefined ? (washing_machine ? 1 : 0) : existing.may_giat,
-      noi_that: furnished !== undefined ? (furnished ? 1 : 0) : existing.noi_that,
-      ban_cong: balcony !== undefined ? (balcony ? 1 : 0) : existing.ban_cong
     };
+    
+    // Tìm hoặc tạo nhà trọ mới dựa trên khu vực (area)
+    let nha_tro_id = existing.nha_tro_id;
+    if (area) {
+      let nha_tro = await queryOne('SELECT id FROM nha_tro WHERE ten_nha_tro = ?', [area]);
+      if (nha_tro) {
+        nha_tro_id = nha_tro.id;
+      } else {
+        await run('INSERT INTO nha_tro (ten_nha_tro, dia_chi) VALUES (?, ?)', [area, area]);
+        const newNhaTro = await queryOne('SELECT id FROM nha_tro WHERE ten_nha_tro = ?', [area]);
+        if (newNhaTro) nha_tro_id = newNhaTro.id;
+      }
+    }
 
     await run(`
       UPDATE phong 
-      SET so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, dieu_hoa = ?, may_giat = ?, noi_that = ?, ban_cong = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      SET nha_tro_id = ?, so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, dieu_hoa = ?, may_giat = ?, noi_that = ?, ban_cong = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [updated.so_phong, updated.tang, updated.dien_tich, updated.gia_phong, updated.trang_thai, updated.mo_ta, updated.so_nguoi_toi_da, updated.dieu_hoa, updated.may_giat, updated.noi_that, updated.ban_cong, req.params.id]);
+    `, [
+      nha_tro_id,
+      room_number !== undefined ? room_number : existing.so_phong,
+      floor !== undefined ? floor : existing.tang,
+      area_sqm !== undefined ? area_sqm : existing.dien_tich,
+      monthly_rent !== undefined ? monthly_rent : existing.gia_phong,
+      status !== undefined ? status : existing.trang_thai,
+      description !== undefined ? description : existing.mo_ta,
+      max_occupants !== undefined ? max_occupants : existing.so_nguoi_toi_da,
+      air_conditioner !== undefined ? (air_conditioner ? 1 : 0) : existing.dieu_hoa,
+      washing_machine !== undefined ? (washing_machine ? 1 : 0) : existing.may_giat,
+      furnished !== undefined ? (furnished ? 1 : 0) : existing.noi_that,
+      balcony !== undefined ? (balcony ? 1 : 0) : existing.ban_cong,
+      req.params.id
+    ]);
 
     const room = await queryOne('SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.id = ?', [req.params.id]);
     res.json(mapRoom(room));
@@ -1626,7 +1657,7 @@ app.post('/api/notifications', authenticate, checkRole('ADMIN'), async (req, res
       VALUES (?, ?, ?, ?, ?)
     `, [req.user.id, title, content, targetType, targetTenantId || null]);
 
-    const notificationId = result.lastID;
+    const notificationId = result.id;
 
     // Create recipients
     if (targetType === 'all') {
@@ -1646,6 +1677,8 @@ app.post('/api/notifications', authenticate, checkRole('ADMIN'), async (req, res
 
 app.get('/api/notifications/my', authenticate, async (req, res) => {
   try {
+    const isArchive = req.query.archive === 'true' ? 1 : 0;
+    
     if (req.user.role === 'ADMIN') {
       // Admin sees all sent notifications with stats
       const notifs = await query(`
@@ -1654,8 +1687,10 @@ app.get('/api/notifications/my', authenticate, async (req, res) => {
           (SELECT COUNT(*) FROM notification_recipients nr WHERE nr.notification_id = n.id AND nr.is_read = 1) as read_count,
           (SELECT COUNT(*) FROM notification_replies nrep WHERE nrep.notification_id = n.id) as reply_count
         FROM notifications n 
+        WHERE n.is_deleted = ?
         ORDER BY n.created_at DESC
-      `);
+        LIMIT 99
+      `, [isArchive]);
       res.json(notifs);
     } else {
       // Tenant sees notifications sent to them
@@ -1665,11 +1700,38 @@ app.get('/api/notifications/my', authenticate, async (req, res) => {
           (SELECT COUNT(*) FROM notification_replies nrep WHERE nrep.notification_id = n.id) as reply_count
         FROM notifications n
         JOIN notification_recipients nr ON n.id = nr.notification_id
-        WHERE nr.tenant_id = ?
+        WHERE nr.tenant_id = ? AND nr.is_deleted = ?
         ORDER BY n.created_at DESC
-      `, [req.user.tenant_id]);
+        LIMIT 99
+      `, [req.user.tenant_id, isArchive]);
       res.json(notifs);
     }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/notifications/:id', authenticate, async (req, res) => {
+  try {
+    if (req.user.role === 'ADMIN') {
+      await run('UPDATE notifications SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+    } else if (req.user.tenant_id) {
+      await run('UPDATE notification_recipients SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE notification_id = ? AND tenant_id = ?', [req.params.id, req.user.tenant_id]);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/notifications/:id/restore', authenticate, async (req, res) => {
+  try {
+    if (req.user.role === 'ADMIN') {
+      await run('UPDATE notifications SET is_deleted = 0, deleted_at = NULL WHERE id = ?', [req.params.id]);
+    } else if (req.user.tenant_id) {
+      await run('UPDATE notification_recipients SET is_deleted = 0, deleted_at = NULL WHERE notification_id = ? AND tenant_id = ?', [req.params.id, req.user.tenant_id]);
+    }
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1740,6 +1802,169 @@ app.post('/api/notifications/:id/replies', authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ----------------- CHAT API -----------------
+
+app.get('/api/chat/my-area', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'TENANT' || !req.user.tenant_id) return res.json({ area: null });
+    const t = await queryOne(`
+      SELECT nt.ten_nha_tro as area 
+      FROM khach_thue k 
+      JOIN hop_dong_thue hd ON k.id = hd.khach_thue_id 
+      JOIN phong p ON hd.phong_id = p.id 
+      JOIN nha_tro nt ON p.nha_tro_id = nt.id
+      WHERE k.id = ? AND hd.dang_hoat_dong = 1
+    `, [req.user.tenant_id]);
+    res.json({ area: t?.area || null });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/chat', authenticate, async (req, res) => {
+  try {
+    const isArchive = req.query.archive === 'true' ? 1 : 0;
+    const isGroup = req.query.is_group === 'true' ? 1 : 0;
+    
+    if (isGroup) {
+      // Group chat
+      const receiverId = req.query.receiver_id || 'ALL'; // 'ALL' or specific area
+      
+      let allowedAreas = ['ALL'];
+      if (req.user.role === 'TENANT' && req.user.tenant_id) {
+        // Find tenant's area
+        const t = await queryOne(`
+          SELECT nt.ten_nha_tro as area 
+          FROM khach_thue k 
+          JOIN hop_dong_thue hd ON k.id = hd.khach_thue_id 
+          JOIN phong p ON hd.phong_id = p.id 
+          JOIN nha_tro nt ON p.nha_tro_id = nt.id
+          WHERE k.id = ? AND hd.dang_hoat_dong = 1
+        `, [req.user.tenant_id]);
+        if (t && t.area) {
+          allowedAreas.push(t.area);
+        }
+      } else if (req.user.role === 'ADMIN') {
+        // Admin can access all areas, so if they specify an area, we allow it.
+        if (receiverId !== 'ALL') allowedAreas.push(receiverId);
+      }
+
+      if (req.user.role === 'TENANT' && !allowedAreas.includes(receiverId)) {
+        return res.status(403).json({ error: 'Không có quyền truy cập khu vực này' });
+      }
+
+      const messages = await query(`
+        SELECT c.*, u.full_name as sender_name 
+        FROM chat_messages c
+        LEFT JOIN users u ON c.sender_id = u.id
+        WHERE c.is_group_chat = 1 AND c.is_deleted = ? AND (c.receiver_id = ? OR c.receiver_id IS NULL)
+        ORDER BY c.created_at DESC
+        LIMIT 99
+      `, [isArchive, receiverId]);
+      return res.json(messages.reverse());
+    }
+
+    // 1-1 Chat
+    const receiverId = req.query.receiver_id;
+    if (!receiverId && req.user.role === 'ADMIN') return res.json([]); 
+    
+    const tenantIdStr = req.user.role === 'TENANT' ? req.user.tenant_id : receiverId;
+
+    // Mark as read
+    if (req.user.role === 'ADMIN') {
+      await run(`
+        UPDATE chat_messages 
+        SET is_read = 1 
+        WHERE is_group_chat = 0 AND sender_role = 'TENANT' AND sender_id = ? AND receiver_id = 'ADMIN' AND is_read = 0
+      `, [tenantIdStr]);
+    } else {
+      await run(`
+        UPDATE chat_messages 
+        SET is_read = 1 
+        WHERE is_group_chat = 0 AND sender_role = 'ADMIN' AND receiver_id = ? AND is_read = 0
+      `, [tenantIdStr]);
+    }
+
+    const messages = await query(`
+      SELECT c.*, u.full_name as sender_name 
+      FROM chat_messages c
+      LEFT JOIN users u ON c.sender_id = u.id
+      WHERE c.is_group_chat = 0 AND c.is_deleted = ?
+      AND (
+        (c.sender_role = 'ADMIN' AND c.receiver_id = ?) OR
+        (c.sender_role = 'TENANT' AND c.sender_id = ?)
+      )
+      ORDER BY c.created_at DESC
+      LIMIT 99
+    `, [isArchive, tenantIdStr, tenantIdStr]);
+    res.json(messages.reverse());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/chat', authenticate, async (req, res) => {
+  try {
+    const { content, is_group, receiver_id } = req.body;
+    if (!content) return res.status(400).json({ error: 'Nội dung không được để trống' });
+    
+    // Group chat is Read-Only for TENANT
+    if (is_group && req.user.role === 'TENANT') {
+      return res.status(403).json({ error: 'Khách thuê chỉ được phép xem nhóm chat' });
+    }
+
+    let targetId = receiver_id;
+    if (is_group) {
+      targetId = receiver_id || 'ALL';
+    } else {
+      targetId = req.user.role === 'TENANT' ? 'ADMIN' : receiver_id;
+    }
+
+    const senderId = req.user.role === 'TENANT' ? req.user.tenant_id : req.user.id;
+
+    await run(`
+      INSERT INTO chat_messages (sender_id, sender_role, receiver_id, is_group_chat, content)
+      VALUES (?, ?, ?, ?, ?)
+    `, [senderId, req.user.role, targetId, is_group ? 1 : 0, content]);
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/chat/:id', authenticate, async (req, res) => {
+  try {
+    await run('UPDATE chat_messages SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/chat/:id/restore', authenticate, async (req, res) => {
+  try {
+    await run('UPDATE chat_messages SET is_deleted = 0, deleted_at = NULL WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Auto cleanup deleted items older than 30 days
+async function cleanupDeletedItems() {
+  try {
+    await run(`DELETE FROM chat_messages WHERE is_deleted = 1 AND deleted_at < datetime('now', '-30 days')`);
+    await run(`DELETE FROM notifications WHERE is_deleted = 1 AND deleted_at < datetime('now', '-30 days')`);
+    await run(`DELETE FROM notification_recipients WHERE is_deleted = 1 AND deleted_at < datetime('now', '-30 days')`);
+  } catch(e) {
+    console.error('Cleanup error:', e);
+  }
+}
+setInterval(cleanupDeletedItems, 24 * 60 * 60 * 1000); // run daily
+setTimeout(cleanupDeletedItems, 5000); // run 5 seconds after startup
+
 
 // Start server
 if (process.env.NODE_ENV !== 'test') {

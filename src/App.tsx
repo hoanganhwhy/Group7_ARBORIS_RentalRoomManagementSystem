@@ -4,13 +4,17 @@ import { Dashboard } from './pages/Dashboard';
 import { TenantDashboard } from './pages/TenantDashboard';
 import NotificationsAdmin from './pages/NotificationsAdmin';
 import NotificationsTenant from './pages/NotificationsTenant';
+import { ChatAdmin } from './pages/ChatAdmin';
+import { ChatTenant } from './pages/ChatTenant';
 import { Rooms } from './pages/Rooms';
 import { Tenants } from './pages/Tenants';
+import { UserManagement } from './pages/UserManagement';
 import { MeterReadings } from './pages/MeterReadings';
 import { Invoices } from './pages/Invoices';
 import { Repairs } from './pages/Repairs';
 import { Login } from './pages/Login';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { AiChatbot } from './components/ui/AiChatbot';
 import type { Page } from './types';
 
 function AppContent() {
@@ -34,6 +38,8 @@ function AppContent() {
         return <Rooms />;
       case 'tenants':
         return <Tenants />;
+      case 'user-management':
+        return <UserManagement />;
       case 'meter-readings':
         return <MeterReadings />;
       case 'invoices':
@@ -42,6 +48,8 @@ function AppContent() {
         return <Repairs />;
       case 'notifications':
         return user?.role === 'TENANT' ? <NotificationsTenant /> : <NotificationsAdmin />;
+      case 'chat':
+        return user?.role === 'TENANT' ? <ChatTenant /> : <ChatAdmin />;
 
       default:
         return <Dashboard onNavigate={setCurrentPage} />;
@@ -120,6 +128,8 @@ function AppContent() {
           {renderPage()}
         </div>
       </main>
+
+      <AiChatbot />
     </div>
   );
 }
