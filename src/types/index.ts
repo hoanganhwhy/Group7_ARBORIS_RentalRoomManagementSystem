@@ -71,6 +71,8 @@ export interface MeterReading {
 
 export interface Invoice {
   id: string;
+  ma_hoa_don: string;
+  qrUrl?: string;
   room_id: string;
   tenant_id: string | null;
   meter_reading_id: string | null;
@@ -81,7 +83,7 @@ export interface Invoice {
   water_cost: number;
   other_fees: number;
   total_amount: number;
-  status: 'pending' | 'paid' | 'overdue';
+  status: 'pending' | 'paid' | 'overdue' | 'waiting_confirmation';
   due_date: string | null;
   paid_date: string | null;
   notes: string | null;

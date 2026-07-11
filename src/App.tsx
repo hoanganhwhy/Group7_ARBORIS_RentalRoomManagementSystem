@@ -8,24 +8,30 @@ import { MeterReadings } from './pages/MeterReadings';
 import { Invoices } from './pages/Invoices';
 import { Repairs } from './pages/Repairs';
 import { Login } from './pages/Login';
+import { Register } from './pages/Register';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import type { Page } from './types';
 
 function AppContent() {
   const { user, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const [authPage, setAuthPage] = useState<'login' | 'register'>('login');
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center bg-cream-50"><div className="w-8 h-8 border-4 border-terra-500 border-t-transparent rounded-full animate-spin"></div></div>;
   }
 
   if (!user) {
-    return <Login />;
+    if (authPage === 'register') {
+      return <Register onNavigateToLogin={() => setAuthPage('login')} />;
+    }
+    return <Login onNavigateToRegister={() => setAuthPage('register')} />;
   }
 
   const renderPage = () => {
     switch (currentPage) {
       case 'dashboard':
+        if (user?.role === 'GUEST') return <div className="p-8 text-center"><h1 className="text-2xl font-bold text-terra-600 mb-4">Chào mừng bạn!</h1><p>Bạn đã đăng nhập thành công. Hãy liên hệ Chủ nhà để được xếp phòng nhé.</p></div>;
         return user?.role === 'TENANT' ? <TenantDashboard /> : <Dashboard onNavigate={setCurrentPage} />;
       case 'rooms':
         return <Rooms />;
@@ -37,6 +43,7 @@ function AppContent() {
         return <Invoices />;
       case 'repairs':
         return <Repairs />;
+
       default:
         return <Dashboard onNavigate={setCurrentPage} />;
     }

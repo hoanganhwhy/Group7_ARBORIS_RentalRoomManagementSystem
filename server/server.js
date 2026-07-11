@@ -1,24 +1,54 @@
 import express from 'express';
+import dotenv from 'dotenv';
+import path from 'path';
+
+dotenv.config({ path: path.join(process.cwd(), '.env') });
+
 import cors from 'cors';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
+import { OAuth2Client } from 'google-auth-library';
 import { query, queryOne, run } from './db.js';
+import { setupContracts } from './contracts.js';
+import { setupInvoices } from './invoices.js';
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(cors());
+// Configure CORS to allow credentials
+app.use(cors({ 
+  origin: true, 
+  credentials: true 
+}));
 app.use(express.json());
+app.use(cookieParser());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'hostelmate-super-secret-key-2024';
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID || 'YOUR_GOOGLE_CLIENT_ID');
 
-export const authenticate = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'No token provided' });
-  const token = authHeader.split(' ')[1];
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 requests per windowMs
+  message: { error: 'Quá nhiều lần thử đăng nhập. Vui lòng thử lại sau 15 phút.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const authenticate = async (req, res, next) => {
+  const token = req.cookies.token || (req.headers.authorization ? req.headers.authorization.split(' ')[1] : null);
+  if (!token) return res.status(401).json({ error: 'No token provided' });
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    
+    // Check token_version to ensure token wasn't invalidated
+    const user = await queryOne('SELECT token_version FROM users WHERE id = ?', [payload.id]);
+    if (!user || user.token_version !== payload.token_version) {
+      return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn hoặc bị vô hiệu hóa' });
+    }
+    
     req.user = payload;
     next();
   } catch (err) {
@@ -26,25 +56,133 @@ export const authenticate = (req, res, next) => {
   }
 };
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   try {
-    const user = await queryOne('SELECT * FROM users WHERE username = ?', [username]);
+    // Allows login via username, phone, or email
+    const user = await queryOne('SELECT * FROM users WHERE username = ? OR phone = ? OR email = ?', [username, username, username]);
     if (!user) return res.status(401).json({ error: 'Sai tài khoản hoặc mật khẩu' });
     
+    if (user.locked_until && new Date(user.locked_until) > new Date()) {
+      return res.status(403).json({ error: 'Tài khoản đang bị khóa do nhập sai nhiều lần. Hãy thử lại sau.' });
+    }
+
     const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Sai tài khoản hoặc mật khẩu' });
+    if (!valid) {
+      const attempts = (user.login_attempts || 0) + 1;
+      let lockedUntil = null;
+      if (attempts >= 5) {
+        lockedUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      }
+      await run('UPDATE users SET login_attempts = ?, locked_until = ? WHERE id = ?', [attempts, lockedUntil, user.id]);
+      return res.status(401).json({ error: 'Sai tài khoản hoặc mật khẩu' });
+    }
     
-    const token = jwt.sign({ id: user.id, role: user.role, tenant_id: user.tenant_id }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: user.id, username: user.username, role: user.role, tenant_id: user.tenant_id } });
+    // Reset attempts on success
+    await run('UPDATE users SET login_attempts = 0, locked_until = NULL WHERE id = ?', [user.id]);
+
+    const token = jwt.sign({ id: user.id, role: user.role, tenant_id: user.tenant_id, token_version: user.token_version || 0 }, JWT_SECRET, { expiresIn: '7d' });
+    
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({ user: { id: user.id, username: user.username, role: user.role, tenant_id: user.tenant_id, full_name: user.full_name, phone: user.phone, email: user.email, cccd: user.cccd, date_of_birth: user.date_of_birth, address: user.address } });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+app.post('/api/auth/register', async (req, res) => {
+  const { username, password, email, phone, full_name } = req.body;
+  try {
+    // 1. Password complexity check
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Mật khẩu phải có ít nhất 6 ký tự.' });
+    }
+
+    // 2. Duplicate check
+    const existing = await queryOne('SELECT id FROM users WHERE username = ? OR email = ? OR phone = ?', [username, email, phone]);
+    if (existing) {
+      return res.status(400).json({ error: 'Tên đăng nhập, email hoặc số điện thoại đã tồn tại.' });
+    }
+
+    const id = generateId();
+    const hash = await bcrypt.hash(password, 10);
+    
+    // GUEST role for non-tenants
+    await run(`
+      INSERT INTO users (id, username, password_hash, role, email, phone, full_name)
+      VALUES (?, ?, ?, 'GUEST', ?, ?, ?)
+    `, [id, username, hash, email, phone, full_name]);
+
+    const token = jwt.sign({ id, role: 'GUEST', token_version: 0 }, JWT_SECRET, { expiresIn: '7d' });
+    
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.status(201).json({ user: { id, username, role: 'GUEST', email, phone, full_name } });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/google-login', async (req, res) => {
+  const { token } = req.body;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID || 'YOUR_GOOGLE_CLIENT_ID'
+    });
+    const payload = ticket.getPayload();
+    const email = payload.email;
+    const name = payload.name;
+    const googleId = payload.sub;
+
+    let user = await queryOne('SELECT * FROM users WHERE email = ? OR google_id = ?', [email, googleId]);
+    
+    if (!user) {
+      // Create GUEST user
+      const id = generateId();
+      await run(`
+        INSERT INTO users (id, username, password_hash, role, email, full_name, google_id)
+        VALUES (?, ?, ?, 'GUEST', ?, ?, ?)
+      `, [id, email, '', email, name, googleId]);
+      user = await queryOne('SELECT * FROM users WHERE id = ?', [id]);
+    } else if (!user.google_id) {
+      await run('UPDATE users SET google_id = ? WHERE id = ?', [googleId, user.id]);
+    }
+
+    const jwtToken = jwt.sign({ id: user.id, role: user.role, tenant_id: user.tenant_id, token_version: user.token_version || 0 }, JWT_SECRET, { expiresIn: '7d' });
+    
+    res.cookie('token', jwtToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({ user: { id: user.id, username: user.username, role: user.role, tenant_id: user.tenant_id, full_name: user.full_name, email: user.email } });
+  } catch (error) {
+    res.status(401).json({ error: 'Đăng nhập Google thất bại' });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('token');
+  res.json({ message: 'Đăng xuất thành công' });
+});
+
 app.get('/api/auth/me', authenticate, async (req, res) => {
   try {
-    const user = await queryOne('SELECT id, username, role, tenant_id FROM users WHERE id = ?', [req.user.id]);
+    const user = await queryOne('SELECT id, username, role, tenant_id, full_name, phone, email, cccd, date_of_birth, address FROM users WHERE id = ?', [req.user.id]);
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ user });
   } catch (error) {
@@ -53,7 +191,20 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
 });
 
 // Helper function to generate UUID
-const generateId = () => crypto.randomUUID();
+export const generateId = () => crypto.randomUUID();
+
+export async function generatePrefixedIdDB(tableName, prefix) {
+  const row = await queryOne(`SELECT id FROM ${tableName} ORDER BY id DESC LIMIT 1`);
+  let nextNum = 1;
+  if (row && row.id && row.id.startsWith(prefix)) {
+    const numPart = row.id.substring(prefix.length);
+    const parsed = parseInt(numPart, 10);
+    if (!isNaN(parsed)) {
+      nextNum = parsed + 1;
+    }
+  }
+  return `${prefix}${String(nextNum).padStart(5, '0')}`;
+}
 
 // ----------------- SCHEMA MAPPERS (Vietnamese DB -> English API) -----------------
 const mapRoom = (r) => {
@@ -129,6 +280,7 @@ const mapInvoice = (i) => {
   if (!i) return null;
   return {
     id: i.id,
+    ma_hoa_don: i.ma_hoa_don,
     room_id: i.phong_id,
     tenant_id: i.khach_thue_id,
     meter_reading_id: i.chi_so_dien_nuoc_id,
@@ -143,8 +295,8 @@ const mapInvoice = (i) => {
     due_date: i.han_thanh_toan,
     paid_date: i.ngay_thanh_toan,
     notes: i.ghi_chu,
-    created_at: i.ngay_tao,
-    updated_at: i.ngay_cap_nhat
+    created_at: i.created_at || i.ngay_tao,
+    updated_at: i.ngay_cap_nhat || i.updated_at
   };
 };
 
@@ -167,6 +319,69 @@ const mapRepair = (rep) => {
   };
 };
 
+app.put('/api/auth/me', authenticate, async (req, res) => {
+  const { full_name, phone, password, email, cccd, date_of_birth, address } = req.body;
+  try {
+    const user = await queryOne('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    let newHash = user.password_hash;
+    let newTokenVersion = user.token_version || 0;
+    let newJwtNeeded = false;
+    
+    if (password && password.trim() !== '') {
+      newHash = await bcrypt.hash(password, 10);
+      newTokenVersion += 1;
+      newJwtNeeded = true;
+    }
+
+    await run('UPDATE users SET full_name = ?, phone = ?, email = ?, cccd = ?, date_of_birth = ?, address = ?, password_hash = ?, token_version = ? WHERE id = ?', [
+      full_name !== undefined ? full_name : user.full_name,
+      phone !== undefined ? phone : user.phone,
+      email !== undefined ? email : user.email,
+      cccd !== undefined ? cccd : user.cccd,
+      date_of_birth !== undefined ? date_of_birth : user.date_of_birth,
+      address !== undefined ? address : user.address,
+      newHash,
+      newTokenVersion,
+      req.user.id
+    ]);
+
+    // Sync to khach_thue table if tenant
+    if (user.role === 'TENANT' && user.tenant_id) {
+      await run(`
+        UPDATE khach_thue 
+        SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [
+        full_name !== undefined ? full_name : user.full_name,
+        phone !== undefined ? phone : user.phone,
+        email !== undefined ? email : user.email,
+        cccd !== undefined ? cccd : user.cccd,
+        date_of_birth !== undefined ? date_of_birth : user.date_of_birth,
+        address !== undefined ? address : user.address,
+        user.tenant_id
+      ]);
+    }
+
+    if (newJwtNeeded) {
+      const token = jwt.sign({ id: user.id, role: user.role, tenant_id: user.tenant_id, token_version: newTokenVersion }, JWT_SECRET, { expiresIn: '7d' });
+      res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
+    }
+
+    const updatedUser = await queryOne('SELECT id, username, role, tenant_id, full_name, phone, email, cccd, date_of_birth, address FROM users WHERE id = ?', [req.user.id]);
+    res.json({ user: updatedUser });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------- DASHBOARD API -----------------
 // ----------------- ROOMS API -----------------
 app.get('/api/rooms', async (req, res) => {
   try {
@@ -284,7 +499,21 @@ app.get('/api/rooms/:id', async (req, res) => {
 
 app.post('/api/rooms', async (req, res) => {
   try {
-    const id = generateId();
+    const maxRow = await queryOne('SELECT MAX(id) as maxId FROM phong');
+    let id = 'A00001';
+    if (maxRow && maxRow.maxId) {
+      const match = maxRow.maxId.match(/^([A-Z])(\d{5})$/);
+      if (match) {
+        let prefix = match[1];
+        let num = parseInt(match[2], 10);
+        num += 1;
+        if (num > 10000) {
+          prefix = String.fromCharCode(prefix.charCodeAt(0) + 1);
+          num = 1;
+        }
+        id = `${prefix}${String(num).padStart(5, '0')}`;
+      }
+    }
     const { area = 'Khu A', room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2 } = req.body;
     
     await run(`
@@ -370,13 +599,26 @@ app.get('/api/tenants/:id', async (req, res) => {
 
 app.post('/api/tenants', async (req, res) => {
   try {
-    const id = generateId();
+    const id = await generatePrefixedIdDB('khach_thue', 'KT');
     const { full_name, phone = '', email = '', id_card_number = '', date_of_birth = '', address = '', emergency_contact = '', notes = '' } = req.body;
     
     await run(`
       INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email, so_cccd, ngay_sinh, dia_chi, lien_he_khan_cap, ghi_chu)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [id, full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes]);
+
+    // Automatically create a user account for the tenant
+    try {
+      const defaultPassword = 'password123';
+      const hash = await bcrypt.hash(defaultPassword, 10);
+      const username = id; // Enforce username to be exactly the tenant ID
+      await run(`
+        INSERT INTO users (id, username, password_hash, role, tenant_id, full_name, phone, email)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `, [id, username, hash, 'TENANT', id, full_name, phone, email]);
+    } catch (userErr) {
+      console.error('Failed to create user account for tenant:', userErr);
+    }
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [id]);
     res.status(201).json(mapTenant(tenant));
@@ -407,6 +649,17 @@ app.put('/api/tenants/:id', async (req, res) => {
       SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, lien_he_khan_cap = ?, ghi_chu = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, updated.lien_he_khan_cap, updated.ghi_chu, req.params.id]);
+
+    // Sync to users table
+    try {
+      await run(`
+        UPDATE users 
+        SET full_name = ?, phone = ?, email = ?, cccd = ?, date_of_birth = ?, address = ?
+        WHERE tenant_id = ?
+      `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, req.params.id]);
+    } catch (e) {
+      console.error('Failed to sync tenant update to user account:', e);
+    }
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
     res.json(mapTenant(tenant));
@@ -455,7 +708,7 @@ app.post('/api/room_assignments', async (req, res) => {
       await run('UPDATE hop_dong_thue SET la_nguoi_dai_dien = 0 WHERE phong_id = ? AND dang_hoat_dong = 1', [room_id]);
     }
 
-    const id = generateId();
+    const id = await generatePrefixedIdDB('hop_dong_thue', 'HDT');
     await run(`
       INSERT INTO hop_dong_thue (id, phong_id, khach_thue_id, ngay_bat_dau, tien_dat_coc, dang_hoat_dong, la_nguoi_dai_dien, ghi_chu, ngay_het_han_hop_dong)
       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
@@ -624,7 +877,7 @@ app.get('/api/meter_readings/latest/:roomId', async (req, res) => {
 
 app.post('/api/meter_readings', async (req, res) => {
   try {
-    const id = generateId();
+    const id = await generatePrefixedIdDB('chi_so_dien_nuoc', 'DN');
     const { room_id, reading_date, electricity_old, electricity_new, water_old, water_new, electricity_price_per_unit = 3500, water_price_per_unit = 15000 } = req.body;
 
     if (!room_id || !reading_date || 
@@ -714,14 +967,14 @@ app.get('/api/invoices', async (req, res) => {
   try {
     const data = await query(`
       SELECT i.*, 
-             r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
+             r.so_phong, r.khu_vuc, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
              t.ho_ten, t.so_dien_thoai, t.email, t.so_cccd, t.ngay_sinh, t.dia_chi, t.lien_he_khan_cap, t.ghi_chu as ghi_chu_khach,
              mr.ngay_ghi_so, mr.so_dien_cu, mr.so_dien_moi, mr.so_nuoc_cu, mr.so_nuoc_moi, mr.don_gia_dien, mr.don_gia_nuoc
       FROM hoa_don i
       JOIN phong r ON i.phong_id = r.id
       LEFT JOIN khach_thue t ON i.khach_thue_id = t.id
       LEFT JOIN chi_so_dien_nuoc mr ON i.chi_so_dien_nuoc_id = mr.id
-      ORDER BY i.ngay_tao DESC
+      ORDER BY i.created_at DESC
     `);
 
     const mapped = data.map(item => ({
@@ -729,6 +982,7 @@ app.get('/api/invoices', async (req, res) => {
       room: {
         id: item.phong_id,
         room_number: item.so_phong,
+        area: item.khu_vuc,
         floor: item.tang,
         area_sqm: item.dien_tich,
         monthly_rent: item.gia_phong,
@@ -795,7 +1049,7 @@ app.get('/api/invoices/:id', async (req, res) => {
   try {
     const item = await queryOne(`
       SELECT i.*, 
-             r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
+             r.so_phong, r.khu_vuc, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
              t.ho_ten, t.so_dien_thoai, t.email, t.so_cccd, t.ngay_sinh, t.dia_chi, t.lien_he_khan_cap, t.ghi_chu as ghi_chu_khach,
              mr.ngay_ghi_so, mr.so_dien_cu, mr.so_dien_moi, mr.so_nuoc_cu, mr.so_nuoc_moi, mr.don_gia_dien, mr.don_gia_nuoc
       FROM hoa_don i
@@ -807,8 +1061,24 @@ app.get('/api/invoices/:id', async (req, res) => {
 
     if (!item) return res.status(404).json({ error: 'Invoice not found' });
 
+    // Build VietQR Url
+    let qrUrl = null;
+    const bankId = process.env.BANK_ID;
+    const accountNumber = process.env.BANK_ACCOUNT_NO;
+    const accountName = process.env.BANK_ACCOUNT_NAME;
+    if (bankId && accountNumber && accountName) {
+      const baseUrl = `https://img.vietqr.io/image/${encodeURIComponent(bankId)}-${encodeURIComponent(accountNumber)}-compact2.png`;
+      const parameters = new URLSearchParams({
+        amount: String(item.tong_tien),
+        addInfo: item.ma_hoa_don,
+        accountName
+      });
+      qrUrl = `${baseUrl}?${parameters.toString()}`;
+    }
+
     res.json({
       ...mapInvoice(item),
+      qrUrl,
       room: {
         id: item.phong_id,
         room_number: item.so_phong,
@@ -849,8 +1119,13 @@ app.get('/api/invoices/:id', async (req, res) => {
 
 app.post('/api/invoices', async (req, res) => {
   try {
-    const id = generateId();
-    const {
+    const id = await generatePrefixedIdDB('hoa_don', 'HD');
+    
+    // Generate ma_hoa_don like HM + timestamp + random hex (e.g. HM1720612345ABCDEF)
+    const randomHex = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const ma_hoa_don = `HM${Math.floor(Date.now() / 1000)}${randomHex}`;
+
+    let {
       room_id,
       tenant_id = null,
       meter_reading_id = null,
@@ -866,14 +1141,18 @@ app.post('/api/invoices', async (req, res) => {
       notes = null,
     } = req.body;
 
+    meter_reading_id = meter_reading_id || null;
+    tenant_id = tenant_id || null;
+
     await run(`
-      INSERT INTO hoa_don (id, phong_id, khach_thue_id, chi_so_dien_nuoc_id, thang_hoa_don, nam_hoa_don, tien_phong, tien_dien, tien_nuoc, chi_phi_khac, tong_tien, trang_thai, han_thanh_toan, ghi_chu)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, room_id, tenant_id, meter_reading_id, invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, total_amount, status, due_date, notes]);
+      INSERT INTO hoa_don (id, ma_hoa_don, phong_id, khach_thue_id, chi_so_dien_nuoc_id, thang_hoa_don, nam_hoa_don, tien_phong, tien_dien, tien_nuoc, chi_phi_khac, tong_tien, trang_thai, han_thanh_toan, ghi_chu)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, ma_hoa_don, room_id, tenant_id, meter_reading_id, invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, total_amount, status, due_date, notes]);
 
     const invoice = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [id]);
     res.status(201).json(mapInvoice(invoice));
   } catch (error) {
+    console.error('Error creating invoice:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -957,6 +1236,16 @@ app.put('/api/invoices/:id/paid', async (req, res) => {
 
 
 // ----------------- REPAIR REQUESTS API -----------------
+app.get('/api/landlord/contact', async (req, res) => {
+  try {
+    const admin = await queryOne('SELECT full_name, phone FROM users WHERE role = "ADMIN" LIMIT 1');
+    if (!admin) return res.status(404).json({ error: 'Admin not found' });
+    res.json({ name: admin.full_name, phone: admin.phone });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/repair_requests', async (req, res) => {
   try {
     const data = await query(`
@@ -1045,7 +1334,7 @@ app.get('/api/repair_requests/:id', async (req, res) => {
 
 app.post('/api/repair_requests', async (req, res) => {
   try {
-    const id = generateId();
+    const id = await generatePrefixedIdDB('yeu_cau_sua_chua', 'SC');
     const { room_id, tenant_id = null, title, description = '', priority = 'medium', status = 'new', assigned_to = null } = req.body;
     
     if (tenant_id) {
@@ -1112,6 +1401,142 @@ app.delete('/api/repair_requests/:id', async (req, res) => {
   }
 });
 
+setupContracts(app, query, queryOne, run);
+setupInvoices(app, query, queryOne, run);
+
+// ----------------- SETTINGS API -----------------
+app.get('/api/settings', async (req, res) => {
+  try {
+    const settings = await queryOne('SELECT * FROM cai_dat_he_thong WHERE id = "default"');
+    res.json(settings || {});
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/settings', async (req, res) => {
+  console.log('PUT /api/settings request body:', req.body);
+  const { momo_number, momo_name, bank_name, bank_account, bank_owner } = req.body;
+  try {
+    await run(`
+      UPDATE cai_dat_he_thong 
+      SET momo_number = ?, momo_name = ?, bank_name = ?, bank_account = ?, bank_owner = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      WHERE id = 'default'
+    `, [momo_number, momo_name, bank_name, bank_account, bank_owner]);
+    
+    const settings = await queryOne('SELECT * FROM cai_dat_he_thong WHERE id = "default"');
+    console.log('Updated settings:', settings);
+    res.json(settings);
+  } catch (error) {
+    console.error('Error updating settings:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------- PAYMENTS API -----------------
+// Khách thuê báo cáo đã thanh toán (Tự động xác nhận cho môi trường test)
+app.post('/api/invoices/:id/report-payment', async (req, res) => {
+  const invoiceId = req.params.id;
+  try {
+    const invoice = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [invoiceId]);
+    if (!invoice) return res.status(404).json({ error: 'Không tìm thấy hóa đơn' });
+    if (invoice.trang_thai === 'paid') return res.status(400).json({ error: 'Hóa đơn đã được thanh toán' });
+    
+    // Đã sửa thành tự động xác nhận (paid) luôn thay vì chờ xác nhận (waiting_confirmation)
+    await run(`
+      UPDATE hoa_don 
+      SET trang_thai = 'paid', ngay_thanh_toan = CURRENT_TIMESTAMP, ngay_cap_nhat = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [invoiceId]);
+    res.json({ success: true, message: 'Đã tự động xác nhận thanh toán thành công.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Chủ nhà xác nhận đã nhận tiền
+app.patch('/api/admin/invoices/:id/confirm-payment', async (req, res) => {
+  const invoiceId = req.params.id;
+  try {
+    const invoice = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [invoiceId]);
+    if (!invoice) return res.status(404).json({ error: 'Không tìm thấy hóa đơn' });
+    if (invoice.trang_thai !== 'waiting_confirmation') return res.status(400).json({ error: 'Hóa đơn không ở trạng thái chờ xác nhận' });
+    
+    await run(`
+      UPDATE hoa_don 
+      SET trang_thai = 'paid', ngay_thanh_toan = CURRENT_TIMESTAMP, ngay_cap_nhat = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [invoiceId]);
+    res.json({ success: true, message: 'Đã xác nhận thanh toán thành công.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Webhook SePay
+app.post('/api/webhooks/sepay', async (req, res) => {
+  const providedAuthorization = req.get("Authorization");
+  const expectedAuthorization = `Apikey ${process.env.SEPAY_WEBHOOK_API_KEY}`;
+
+  if (!process.env.SEPAY_WEBHOOK_API_KEY || providedAuthorization !== expectedAuthorization) {
+    return res.status(401).json({ success: false, message: "Webhook không hợp lệ" });
+  }
+
+  const { id, accountNumber, content, transferType, transferAmount, referenceCode } = req.body;
+
+  if (!id || !Number.isFinite(Number(transferAmount))) {
+    return res.status(400).json({ success: false, message: "Dữ liệu webhook không hợp lệ" });
+  }
+
+  if (transferType !== "in") {
+    return res.json({ success: true, ignored: true });
+  }
+
+  if (process.env.BANK_ACCOUNT_NO && String(accountNumber) !== String(process.env.BANK_ACCOUNT_NO)) {
+    return res.json({ success: true, ignored: true, reason: "ACCOUNT_MISMATCH" });
+  }
+
+  const normalizedContent = String(content || "").toUpperCase();
+  const codeMatch = normalizedContent.match(/HM\d+[A-F0-9]{6}/);
+  const paymentCode = codeMatch?.[0] || null;
+
+  try {
+    await run(`
+      INSERT OR IGNORE INTO bank_transactions (
+        provider_transaction_id, account_number, transfer_amount, transfer_content, reference_code, raw_payload
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `, [String(id), String(accountNumber || ""), Number(transferAmount), String(content || ""), String(referenceCode || ""), JSON.stringify(req.body)]);
+    
+    // In sqlite, we can't easily check if INSERT OR IGNORE actually inserted without a separate SELECT, 
+    // but the uniqueness of provider_transaction_id handles deduplication. Let's query to ensure it's not a duplicate processing
+    
+    if (!paymentCode) {
+      return res.json({ success: true, matched: false, reason: "PAYMENT_CODE_NOT_FOUND" });
+    }
+
+    const invoice = await queryOne('SELECT * FROM hoa_don WHERE ma_hoa_don = ?', [paymentCode]);
+
+    if (!invoice) {
+      return res.json({ success: true, matched: false, reason: "INVOICE_NOT_FOUND" });
+    }
+
+    if (Number(transferAmount) !== Number(invoice.tong_tien)) {
+      return res.json({ success: true, matched: false, reason: "AMOUNT_MISMATCH" });
+    }
+
+    await run(`
+      UPDATE hoa_don
+      SET trang_thai = 'paid', ngay_thanh_toan = CURRENT_TIMESTAMP, ngay_cap_nhat = CURRENT_TIMESTAMP
+      WHERE id = ? AND trang_thai != 'paid' AND tong_tien = ?
+    `, [invoice.id, Number(transferAmount)]);
+
+    return res.json({ success: true, matched: true, invoiceId: invoice.id, paymentStatus: "PAID" });
+
+  } catch (error) {
+    console.error('SePay Webhook Error:', error);
+    return res.status(500).json({ success: false });
+  }
+});
 
 // Start server
 if (process.env.NODE_ENV !== 'test') {

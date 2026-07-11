@@ -15,6 +15,7 @@ import {
 import { Modal } from '../components/ui/Modal';
 import { Button } from '../components/ui/Button';
 import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { useAuth } from '../context/AuthContext';
 import {
   getRepairRequests,
   createRepairRequest,
@@ -26,6 +27,8 @@ import {
 import type { RepairRequest, Room, Tenant } from '../types';
 
 export function Repairs() {
+  const { user } = useAuth();
+  const isTenant = user?.role === 'TENANT';
   const [repairs, setRepairs] = useState<RepairRequest[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -75,7 +78,14 @@ export function Repairs() {
 
   function openCreateModal() {
     setEditingRepair(null);
-    setFormData({ room_id: '', tenant_id: '', title: '', description: '', priority: 'medium', status: 'new', assigned_to: '', resolution_notes: '' });
+    let defaultRoom = '';
+    let defaultTenant = '';
+    if (isTenant) {
+      defaultTenant = user?.tenant_id || '';
+      const tenantRoom = rooms.find(r => r.active_assignments?.some(a => a.tenant_id === defaultTenant));
+      defaultRoom = tenantRoom?.id || '';
+    }
+    setFormData({ room_id: defaultRoom, tenant_id: defaultTenant, title: '', description: '', priority: 'medium', status: 'new', assigned_to: '', resolution_notes: '' });
     setIsModalOpen(true);
   }
 
@@ -163,7 +173,11 @@ export function Repairs() {
     }
   }
 
-  const filteredRepairs = repairs.filter((repair) => {
+  const userRepairs = isTenant
+    ? repairs.filter(r => r.tenant_id === user?.tenant_id)
+    : repairs;
+
+  const filteredRepairs = userRepairs.filter((repair) => {
     const matchesStatus = repair.status === filter;
     
     // Parse reported_at date
@@ -178,16 +192,16 @@ export function Repairs() {
   });
 
   const statusCounts = {
-    new: repairs.filter((r) => r.status === 'new').length,
-    in_progress: repairs.filter((r) => r.status === 'in_progress').length,
-    resolved: repairs.filter((r) => r.status === 'resolved').length,
-    closed: repairs.filter((r) => r.status === 'closed').length,
+    new: userRepairs.filter((r) => r.status === 'new').length,
+    in_progress: userRepairs.filter((r) => r.status === 'in_progress').length,
+    resolved: userRepairs.filter((r) => r.status === 'resolved').length,
+    closed: userRepairs.filter((r) => r.status === 'closed').length,
   };
 
   // Only tenants currently in the selected room can report a repair
   const tenantsInSelectedRoom = (() => {
     if (!formData.room_id) return [];
-    const room = rooms.find((r) => r.id === formData.room_id);
+    const room = rooms.find((r) => r.id.toString() === formData.room_id.toString());
     return (room?.active_assignments ?? [])
       .map((a) => a.tenant)
       .filter((t): t is NonNullable<typeof t> => Boolean(t));
@@ -313,44 +327,51 @@ export function Repairs() {
           <div className="grid grid-cols-2 gap-4">
             <Input label="Chọn phòng" name="room_id" type="select" value={formData.room_id}
               onChange={(v) => {
-                const room = rooms.find((r) => r.id === v);
+                const room = rooms.find((r) => r.id.toString() === v.toString());
                 const primaryTenant = room?.active_assignments?.find((a) => a.is_primary)?.tenant;
                 setFormData({ ...formData, room_id: v, tenant_id: primaryTenant?.id || '' });
               }}
               required
+              disabled={isTenant}
               options={[{ value: '', label: '-- Chọn phòng --' }, ...rooms.map((r) => ({ value: r.id, label: `Phòng ${r.room_number}` }))]}
             />
-            <Input label="Người báo (Bắt buộc)" name="tenant_id" type="select" value={formData.tenant_id}
-              onChange={(v) => setFormData({ ...formData, tenant_id: v })}
-              disabled={!formData.room_id}
-              required
-              options={[
-                {
-                  value: '',
-                  label: !formData.room_id
-                    ? '-- Chọn phòng trước --'
-                    : tenantsInSelectedRoom.length === 0
-                    ? '-- Không có người ở phòng này --'
-                    : '-- Chọn người báo --',
-                },
-                ...tenantsInSelectedRoom.map((t) => ({ value: t.id, label: t.full_name })),
-              ]}
-            />
+            {!isTenant && (
+              <Input label="Người báo (Bắt buộc)" name="tenant_id" type="select" value={formData.tenant_id}
+                onChange={(v) => setFormData({ ...formData, tenant_id: v })}
+                disabled={!formData.room_id}
+                required
+                options={[
+                  {
+                    value: '',
+                    label: !formData.room_id
+                      ? '-- Chọn phòng trước --'
+                      : tenantsInSelectedRoom.length === 0
+                      ? '-- Không có người ở phòng này --'
+                      : '-- Chọn người báo --',
+                  },
+                  ...tenantsInSelectedRoom.map((t) => ({ value: t.id, label: t.full_name })),
+                ]}
+              />
+            )}
           </div>
           <Input label="Mô tả chi tiết" name="description" type="textarea" value={formData.description} onChange={(v) => setFormData({ ...formData, description: v })} placeholder="Mô tả chi tiết sự cố..." rows={3} />
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Mức độ ưu tiên" name="priority" type="select" value={formData.priority}
-              onChange={(v) => setFormData({ ...formData, priority: v as 'low' | 'medium' | 'high' | 'urgent' })}
-              options={[{ value: 'low', label: 'Thấp' }, { value: 'medium', label: 'Trung bình' }, { value: 'high', label: 'Cao' }, { value: 'urgent', label: 'Khẩn cấp' }]}
-            />
-            <Input label="Trạng thái" name="status" type="select" value={formData.status}
-              onChange={(v) => setFormData({ ...formData, status: v as 'new' | 'in_progress' | 'resolved' | 'closed' })}
-              options={[{ value: 'new', label: 'Mới tạo' }, { value: 'in_progress', label: 'Đang xử lý' }, { value: 'resolved', label: 'Đã xong' }, { value: 'closed', label: 'Lịch sử' }]}
-            />
-          </div>
-          <Input label="Người phụ trách" name="assigned_to" value={formData.assigned_to} onChange={(v) => setFormData({ ...formData, assigned_to: v })} placeholder="VD: Nguyễn Văn A" />
-          {(formData.status === 'resolved' || formData.status === 'closed') && (
-            <Input label="Ghi chú xử lý" name="resolution_notes" type="textarea" value={formData.resolution_notes} onChange={(v) => setFormData({ ...formData, resolution_notes: v })} placeholder="Mô tả cách xử lý..." rows={2} />
+          {!isTenant && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <Input label="Mức độ ưu tiên" name="priority" type="select" value={formData.priority}
+                  onChange={(v) => setFormData({ ...formData, priority: v as 'low' | 'medium' | 'high' | 'urgent' })}
+                  options={[{ value: 'low', label: 'Thấp' }, { value: 'medium', label: 'Trung bình' }, { value: 'high', label: 'Cao' }, { value: 'urgent', label: 'Khẩn cấp' }]}
+                />
+                <Input label="Trạng thái" name="status" type="select" value={formData.status}
+                  onChange={(v) => setFormData({ ...formData, status: v as 'new' | 'in_progress' | 'resolved' | 'closed' })}
+                  options={[{ value: 'new', label: 'Mới tạo' }, { value: 'in_progress', label: 'Đang xử lý' }, { value: 'resolved', label: 'Đã xong' }, { value: 'closed', label: 'Lịch sử' }]}
+                />
+              </div>
+              <Input label="Người phụ trách" name="assigned_to" value={formData.assigned_to} onChange={(v) => setFormData({ ...formData, assigned_to: v })} placeholder="VD: Nguyễn Văn A" />
+              {(formData.status === 'resolved' || formData.status === 'closed') && (
+                <Input label="Ghi chú xử lý" name="resolution_notes" type="textarea" value={formData.resolution_notes} onChange={(v) => setFormData({ ...formData, resolution_notes: v })} placeholder="Mô tả cách xử lý..." rows={2} />
+              )}
+            </>
           )}
           <div className="flex gap-3 pt-4 border-t border-slate-200">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Hủy</Button>
@@ -430,26 +451,28 @@ export function Repairs() {
               </div>
             )}
 
-            <div className="flex gap-2 pt-5 border-t border-charcoal-100 flex-wrap">
-              {viewingRepair.status === 'new' && (
-                <Button onClick={() => handleStatusChange(viewingRepair, 'in_progress')}>
-                  <Clock className="w-4 h-4" />Bắt đầu xử lý
+            {!isTenant && (
+              <div className="flex gap-2 pt-5 border-t border-charcoal-100 flex-wrap">
+                {viewingRepair.status === 'new' && (
+                  <Button onClick={() => handleStatusChange(viewingRepair, 'in_progress')}>
+                    <Clock className="w-4 h-4" />Bắt đầu xử lý
+                  </Button>
+                )}
+                {viewingRepair.status === 'in_progress' && (
+                  <Button variant="success" onClick={() => handleStatusChange(viewingRepair, 'resolved')}>
+                    <CheckCircle className="w-4 h-4" />Đã hoàn thành
+                  </Button>
+                )}
+                {viewingRepair.status === 'resolved' && (
+                  <Button variant="secondary" onClick={() => handleStatusChange(viewingRepair, 'closed')}>
+                    <X className="w-4 h-4" />Đóng yêu cầu
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={() => { setIsDetailModalOpen(false); openEditModal(viewingRepair); }}>
+                  <Edit2 className="w-4 h-4" />Sửa
                 </Button>
-              )}
-              {viewingRepair.status === 'in_progress' && (
-                <Button variant="success" onClick={() => handleStatusChange(viewingRepair, 'resolved')}>
-                  <CheckCircle className="w-4 h-4" />Đã hoàn thành
-                </Button>
-              )}
-              {viewingRepair.status === 'resolved' && (
-                <Button variant="secondary" onClick={() => handleStatusChange(viewingRepair, 'closed')}>
-                  <X className="w-4 h-4" />Đóng yêu cầu
-                </Button>
-              )}
-              <Button variant="ghost" onClick={() => { setIsDetailModalOpen(false); openEditModal(viewingRepair); }}>
-                <Edit2 className="w-4 h-4" />Sửa
-              </Button>
-            </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>

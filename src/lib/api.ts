@@ -1,6 +1,6 @@
 import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest } from '../types';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = {
@@ -11,6 +11,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers,
+    credentials: 'include'
   });
 
   if (!response.ok) {
@@ -270,4 +271,39 @@ export async function getDashboardStats() {
     recentRepairs: repairs.slice(0, 5),
     recentInvoices: invoices.slice(0, 5),
   };
+}
+
+export async function reportPayment(invoiceId: string) {
+  const res = await fetch(`${BASE_URL}/invoices/${invoiceId}/report-payment`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to report payment');
+  return res.json();
+}
+
+export async function confirmPayment(invoiceId: string) {
+  const res = await fetch(`${BASE_URL}/admin/invoices/${invoiceId}/confirm-payment`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+  });
+  if (!res.ok) throw new Error('Failed to confirm payment');
+  return res.json();
+}
+
+// --- REPAIR REQUESTS ---
+export async function getSettings() {
+  const res = await fetch(`${BASE_URL}/settings`, { headers: getHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch settings');
+  return res.json();
+}
+
+export async function updateSettings(data: any) {
+  const res = await fetch(`${BASE_URL}/settings`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to update settings');
+  return res.json();
 }

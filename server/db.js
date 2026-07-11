@@ -199,7 +199,7 @@ function initDatabase() {
         tien_nuoc REAL NOT NULL DEFAULT 0,
         chi_phi_khac REAL DEFAULT 0,
         tong_tien REAL NOT NULL DEFAULT 0,
-        trang_thai TEXT NOT NULL DEFAULT 'pending' CHECK (trang_thai IN ('pending', 'paid', 'overdue')),
+        trang_thai TEXT NOT NULL DEFAULT 'pending',
         han_thanh_toan TEXT,
         ngay_thanh_toan TEXT,
         ghi_chu TEXT,
@@ -227,6 +227,53 @@ function initDatabase() {
         ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // 7. users Table (Tài khoản)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('ADMIN', 'MANAGER', 'TENANT')),
+        tenant_id TEXT REFERENCES khach_thue(id) ON DELETE CASCADE,
+        full_name TEXT,
+        phone TEXT,
+        email TEXT,
+        cccd TEXT,
+        date_of_birth TEXT,
+        address TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `, (err) => {
+      if (!err) {
+        db.get("SELECT id FROM users WHERE role = 'ADMIN'", async (err, row) => {
+          if (!err && !row) {
+            const hash = await bcrypt.hash('admin123', 10);
+            db.run("INSERT INTO users (id, username, password_hash, role, full_name, phone) VALUES ('admin-id-1', 'admin', ?, 'ADMIN', 'Nguyễn Văn Chủ Nhà', '0901234567')", [hash]);
+          }
+        });
+      }
+    });
+
+    // 9. settings Table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS cai_dat_he_thong (
+        id TEXT PRIMARY KEY,
+        momo_number TEXT,
+        momo_name TEXT,
+        bank_name TEXT,
+        bank_account TEXT,
+        bank_owner TEXT,
+        ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `, () => {
+      // Ensure there is at least one row
+      db.get("SELECT id FROM cai_dat_he_thong", [], (err, row) => {
+        if (!row) {
+          db.run("INSERT INTO cai_dat_he_thong (id) VALUES ('default')");
+        }
+      });
+    });
 
     // Indexes (Chỉ mục tối ưu)
     db.run(`CREATE INDEX IF NOT EXISTS idx_rooms_status ON phong(trang_thai);`);

@@ -28,7 +28,7 @@ import {
   extendContract,
 } from '../lib/api';
 import type { Room, Tenant, RoomAssignment } from '../types';
-import { Search, AlertTriangle, CalendarDays, RefreshCw, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { Search, AlertTriangle, CalendarDays, RefreshCw, LayoutGrid, List as ListIcon, FileText } from 'lucide-react';
 
 export function Rooms() {
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -177,6 +177,28 @@ export function Rooms() {
     }
   }
 
+  async function handleGenerateContract(assignment: RoomAssignment) {
+    try {
+      if (assignment.file_hop_dong) {
+        window.open(`http://localhost:5000/api/contracts/${assignment.id}/download`, '_blank');
+        return;
+      }
+      
+      const res = await fetch(`http://localhost:5000/api/contracts/${assignment.id}/generate`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        alert('Tạo hợp đồng thành công!');
+        await loadData();
+      } else {
+        alert('Lỗi khi tạo hợp đồng');
+      }
+    } catch (error) {
+      alert('Lỗi hệ thống');
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (formData.floor > 50) {
@@ -263,7 +285,7 @@ export function Rooms() {
       await loadData();
       // Refresh viewing room if open
       if (viewingRoom) {
-        const updated = rooms.find(r => r.id === viewingRoom.id);
+        const updated = rooms.find(r => r.id.toString() === viewingRoom.id.toString());
         if (updated) setViewingRoom(updated);
       }
     } catch (error) {
@@ -486,6 +508,7 @@ export function Rooms() {
               onAssignTenant={() => openAssignModal(room)}
               onCheckout={handleCheckout}
               onSetPrimary={handleSetPrimary}
+              onGenerateContract={handleGenerateContract}
             />
           ))}
         </div>
@@ -823,6 +846,7 @@ function PropertyCard({
   onAssignTenant: () => void;
   onCheckout: (a: RoomAssignment) => void;
   onSetPrimary: (a: RoomAssignment, roomId: string) => void;
+  onGenerateContract: (a: RoomAssignment) => void;
 }) {
   const statusConfig = {
     available: { variant: 'success' as const, bg: 'bg-sage-50', iconBg: 'bg-sage-100 text-sage-600' },
@@ -938,6 +962,13 @@ function PropertyCard({
                         <Crown className="w-4 h-4" />
                       </button>
                     )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onGenerateContract(assignment); }}
+                      className={`p-1.5 rounded-lg transition-colors ${assignment.file_hop_dong ? 'text-blue-500 bg-blue-50 hover:bg-blue-100' : 'text-charcoal-300 hover:text-blue-500 hover:bg-blue-50'}`}
+                      title={assignment.file_hop_dong ? (assignment.trang_thai_ky === 'Đã ký' ? 'Hợp đồng đã ký (Tải về)' : 'Tải hợp đồng (Chờ ký)') : 'Tạo hợp đồng PDF'}
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
                     <button
                       onClick={() => onCheckout(assignment)}
                       className="p-1.5 rounded-lg text-charcoal-300 hover:text-rose-500 hover:bg-rose-50 transition-colors"

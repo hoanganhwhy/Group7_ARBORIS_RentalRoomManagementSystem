@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Building2, LogIn, Lock, User } from 'lucide-react';
+import { GoogleLogin } from '@react-oauth/google';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-export function Login() {
+export function Login({ onNavigateToRegister }: { onNavigateToRegister: () => void }) {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -21,6 +22,7 @@ export function Login() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
+        credentials: 'include' // Important for HttpOnly cookies
       });
 
       const data = await res.json();
@@ -28,11 +30,29 @@ export function Login() {
         throw new Error(data.error || 'Đăng nhập thất bại');
       }
 
-      login(data.token, data.user);
+      login(data.user);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGoogleSuccess = async (credentialResponse: any) => {
+    try {
+      const res = await fetch(`${API_URL}/auth/google-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: credentialResponse.credential }),
+        credentials: 'include'
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Google login failed');
+      
+      login(data.user);
+    } catch (err: any) {
+      setError(err.message);
     }
   };
 
@@ -48,7 +68,7 @@ export function Login() {
           Smart Rental
         </h2>
         <p className="mt-2 text-center text-sm text-charcoal-500">
-          Hệ thống quản lý phòng trọ thông minh
+          Đăng nhập để trải nghiệm hệ thống quản lý trọ
         </p>
       </div>
 
@@ -62,7 +82,7 @@ export function Login() {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-charcoal-700">Tài khoản</label>
+              <label className="block text-sm font-medium text-charcoal-700">Tài khoản / Email / SĐT</label>
               <div className="mt-1 relative rounded-xl shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <User className="h-5 w-5 text-charcoal-400" />
@@ -73,7 +93,7 @@ export function Login() {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="focus:ring-terra-400 focus:border-terra-400 block w-full pl-10 sm:text-sm border-charcoal-200 rounded-xl py-3"
-                  placeholder="Nhập tên đăng nhập"
+                  placeholder="Nhập tên đăng nhập, email hoặc SĐT"
                 />
               </div>
             </div>
@@ -95,6 +115,14 @@ export function Login() {
               </div>
             </div>
 
+            <div className="flex items-center justify-between">
+              <div className="text-sm">
+                <a href="#" className="font-medium text-terra-600 hover:text-terra-500">
+                  Quên mật khẩu?
+                </a>
+              </div>
+            </div>
+
             <div>
               <button
                 type="submit"
@@ -110,6 +138,41 @@ export function Login() {
               </button>
             </div>
           </form>
+
+          <div className="mt-6">
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-gray-500">Hoặc tiếp tục với</span>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-center">
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={() => setError('Đăng nhập Google thất bại')}
+                theme="outline"
+                size="large"
+                width="100%"
+                text="signin_with"
+                shape="rectangular"
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 text-center text-sm">
+            <p className="text-charcoal-600">
+              Chưa có tài khoản?{' '}
+              <button 
+                onClick={onNavigateToRegister} 
+                className="font-medium text-terra-600 hover:text-terra-500 bg-transparent border-none p-0 cursor-pointer"
+              >
+                Đăng ký ngay để trải nghiệm
+              </button>
+            </p>
+          </div>
         </div>
       </div>
     </div>

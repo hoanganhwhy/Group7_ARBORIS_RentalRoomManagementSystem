@@ -7,10 +7,13 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
+  CreditCard,
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { Button } from '../components/ui/Button';
 import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { useAuth } from '../context/AuthContext';
+import { MockPaymentGateway } from './MockPaymentGateway';
 import {
   getInvoices,
   createInvoice,
@@ -20,10 +23,13 @@ import {
   markOverdueInvoices,
   getRooms,
   getMeterReadings,
+  confirmPayment,
 } from '../lib/api';
 import type { Invoice, Room, MeterReading } from '../types';
 
 export function Invoices() {
+  const { user } = useAuth();
+  const isTenant = user?.role === 'TENANT';
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [readings, setReadings] = useState<MeterReading[]>([]);
@@ -32,7 +38,8 @@ export function Invoices() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
-  const [filter, setFilter] = useState<'pending' | 'paid' | 'overdue'>('pending');
+  const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
+  const [filter, setFilter] = useState<'pending' | 'paid' | 'overdue' | 'waiting_confirmation'>('pending');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
   const [filterYear, setFilterYear] = useState<number>(0); // 0 = all
   const [filterFloor, setFilterFloor] = useState<string>('all');
@@ -117,7 +124,7 @@ export function Invoices() {
   }
 
   function handleRoomChange(roomId: string) {
-    const room = rooms.find((r) => r.id === roomId);
+    const room = rooms.find((r) => r.id.toString() === roomId.toString());
     if (room) {
       const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         .toISOString()
@@ -128,23 +135,25 @@ export function Invoices() {
         room_rent: room.monthly_rent,
         due_date: dueDate,
       });
+    } else {
+      setFormData({ ...formData, room_id: roomId });
     }
   }
 
   function handleReadingChange(readingId: string) {
-    const reading = readings.find((r) => r.id === readingId);
+    const reading = readings.find((r) => r.id.toString() === readingId.toString());
     if (reading) {
-      const elecUsage = reading.electricity_new - reading.electricity_old;
-      const waterUsage = reading.water_new - reading.water_old;
-      const electricityCost = elecUsage * reading.electricity_price_per_unit;
-      const waterCost = waterUsage * reading.water_price_per_unit;
-
+      const elecCost = (reading.electricity_new - reading.electricity_old) * reading.electricity_price_per_unit;
+      const waterCost = (reading.water_new - reading.water_old) * reading.water_price_per_unit;
+      
       setFormData({
         ...formData,
         meter_reading_id: readingId,
-        electricity_cost: electricityCost,
+        electricity_cost: elecCost,
         water_cost: waterCost,
       });
+    } else {
+      setFormData({ ...formData, meter_reading_id: readingId });
     }
   }
 
@@ -152,7 +161,7 @@ export function Invoices() {
     e.preventDefault();
     setSaving(true);
     try {
-      const room = rooms.find((r) => r.id === formData.room_id);
+      const room = rooms.find((r) => r.id.toString() === formData.room_id.toString());
       const rentVal = parseFloat(formData.room_rent as any) || 0;
       const elecVal = parseFloat(formData.electricity_cost as any) || 0;
       const waterVal = parseFloat(formData.water_cost as any) || 0;
@@ -198,18 +207,36 @@ export function Invoices() {
     }
   }
 
-  async function handleMarkPaid(invoice: Invoice) {
+  const handleMarkPaid = async (invoice: Invoice) => {
     try {
-      await markInvoicePaid(invoice.id);
+      await updateInvoice(invoice.id, { status: 'paid', paid_date: new Date().toISOString() });
       await loadData();
-    } catch (error) {
-      console.error('Failed to mark invoice as paid:', error);
-      alert('Không thể cập nhật trạng thái.');
+    } catch (err) {
+      console.error('Failed to mark invoice as paid', err);
     }
-  }
+  };
 
-  const filteredInvoices = invoices.filter((invoice) => {
-    const matchesStatus = invoice.status === filter;
+  const handleConfirmPayment = async (invoice: Invoice) => {
+    try {
+      await confirmPayment(invoice.id);
+      await loadData();
+      alert('Đã xác nhận thanh toán thành công!');
+    } catch (err) {
+      console.error('Failed to confirm payment', err);
+      alert('Có lỗi xảy ra khi xác nhận thanh toán.');
+    }
+  };
+
+  const userInvoices = isTenant 
+    ? invoices.filter(i => i.tenant_id === user?.tenant_id)
+    : invoices;
+
+  const filteredInvoices = userInvoices.filter((invoice) => {
+    let matchesStatus = invoice.status === filter;
+    if (isTenant && filter === 'pending') {
+      matchesStatus = invoice.status === 'pending' || invoice.status === 'overdue';
+    }
+    
     const matchesYear = filterYear === 0 || invoice.invoice_year === filterYear;
     const matchesMonth = filterMonth === 0 || invoice.invoice_month === filterMonth;
     const matchesFloor = filterFloor === 'all' || (invoice.room && invoice.room.floor.toString() === filterFloor);
@@ -219,20 +246,25 @@ export function Invoices() {
   });
 
   const statusCounts = {
-    pending: invoices.filter((i) => i.status === 'pending').length,
-    paid: invoices.filter((i) => i.status === 'paid').length,
-    overdue: invoices.filter((i) => i.status === 'overdue').length,
+    pending: userInvoices.filter(i => i.status === 'pending').length,
+    paid: userInvoices.filter(i => i.status === 'paid').length,
+    overdue: userInvoices.filter(i => i.status === 'overdue').length,
+    waiting_confirmation: userInvoices.filter(i => i.status === 'waiting_confirmation').length,
   };
 
-  const totalPending = invoices
+  const totalPending = userInvoices
     .filter((i) => i.status === 'pending')
     .reduce((sum, i) => sum + Number(i.total_amount), 0);
 
-  const totalPaid = invoices
+  const totalPaid = userInvoices
     .filter((i) => i.status === 'paid')
     .reduce((sum, i) => sum + Number(i.total_amount), 0);
 
   if (loading) return <Spinner />;
+
+  if (payingInvoice) {
+    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); loadData(); }} />;
+  }
 
   return (
     <div className="space-y-10">
@@ -242,18 +274,20 @@ export function Invoices() {
           <h1 className="text-3xl font-semibold text-charcoal-900 tracking-tight">Hóa đơn</h1>
           <p className="text-charcoal-400 mt-2 text-base">Lập và quản lý hóa đơn thanh toán</p>
         </div>
-        <Button onClick={openCreateModal}>
-          <Plus className="w-4 h-4" />
-          Tạo hóa đơn
-        </Button>
+        {!isTenant && (
+          <Button onClick={openCreateModal}>
+            <Plus className="w-4 h-4" />
+            Tạo hóa đơn
+          </Button>
+        )}
       </header>
 
       {/* Financial Summary */}
-      <section className="grid grid-cols-3 gap-6">
+      <section className={`grid ${isTenant ? 'grid-cols-2' : 'grid-cols-3'} gap-6`}>
         <div className="bg-sage-50 rounded-2xl border border-sage-100 p-6">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm text-charcoal-500 font-medium">Doanh thu đã thu</p>
+              <p className="text-sm text-charcoal-500 font-medium">{isTenant ? 'Tổng đã trả' : 'Doanh thu đã thu'}</p>
               <p className="text-2xl font-semibold text-charcoal-900 mt-2">
                 {totalPaid.toLocaleString('vi-VN')}đ
               </p>
@@ -266,7 +300,7 @@ export function Invoices() {
         <div className="bg-amber-50 rounded-2xl border border-amber-100 p-6">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm text-charcoal-500 font-medium">Chờ thanh toán</p>
+              <p className="text-sm text-charcoal-500 font-medium">{isTenant ? 'Đang nợ' : 'Chờ thanh toán'}</p>
               <p className="text-2xl font-semibold text-charcoal-900 mt-2">
                 {totalPending.toLocaleString('vi-VN')}đ
               </p>
@@ -276,35 +310,38 @@ export function Invoices() {
             </div>
           </div>
         </div>
-        <div className="bg-rose-50 rounded-2xl border border-rose-100 p-6">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-sm text-charcoal-500 font-medium">Quá hạn</p>
-              <p className="text-2xl font-semibold text-rose-600 mt-2">
-                {statusCounts.overdue} hóa đơn
-              </p>
-            </div>
-            <div className="w-11 h-11 rounded-xl bg-rose-100 flex items-center justify-center">
-              <AlertCircle className="w-5 h-5 text-rose-600" />
+        {!isTenant && (
+          <div className="bg-rose-50 rounded-2xl border border-rose-100 p-6">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-charcoal-500 font-medium">Quá hạn</p>
+                <p className="text-2xl font-semibold text-rose-600 mt-2">
+                  {statusCounts.overdue} hóa đơn
+                </p>
+              </div>
+              <div className="w-11 h-11 rounded-xl bg-rose-100 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-rose-600" />
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </section>
 
       {/* Filters */}
       <section className="space-y-4">
-        <div className="flex gap-2 items-center flex-wrap">
-          {(['pending', 'paid', 'overdue'] as const).map((status) => (
+        <div className="flex bg-charcoal-50 p-1.5 rounded-xl border border-charcoal-200">
+          {(['pending', 'waiting_confirmation', 'paid', 'overdue'] as const).map(status => (
             <button
               key={status}
               onClick={() => setFilter(status)}
-              className={`px-5 py-2.5 text-sm font-medium rounded-xl transition-all ${
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
                 filter === status
                   ? 'bg-white text-charcoal-900 shadow-card border border-charcoal-100'
                   : 'text-charcoal-400 hover:text-charcoal-600 hover:bg-white/50'
               }`}
             >
               {status === 'pending' && 'Chờ thanh toán'}
+              {status === 'waiting_confirmation' && 'Chờ xác nhận'}
               {status === 'paid' && 'Lịch sử'}
               {status === 'overdue' && 'Quá hạn'}
               <span className={`ml-2 px-2 py-0.5 rounded-lg text-xs ${
@@ -312,6 +349,7 @@ export function Invoices() {
               }`}>{statusCounts[status]}</span>
             </button>
           ))}
+        </div>
           <div className="flex items-center gap-4 flex-wrap">
             <input
               type="date"
@@ -320,26 +358,30 @@ export function Invoices() {
               className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
               title="Lọc theo ngày thanh toán"
             />
-            <select
-              value={filterArea}
-              onChange={(e) => setFilterArea(e.target.value)}
-              className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-            >
-              <option value="all">Tất cả khu vực</option>
-              {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
-            <select
-              value={filterFloor}
-              onChange={(e) => setFilterFloor(e.target.value)}
-              className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-            >
-              <option value="all">Tất cả tầng</option>
-              {Array.from(new Set(rooms.map(r => r.floor))).sort((a,b)=>Number(a)-Number(b)).map(f => (
-                <option key={f} value={f}>Tầng {f}</option>
-              ))}
-            </select>
+            {!isTenant && (
+              <>
+                <select
+                  value={filterArea}
+                  onChange={(e) => setFilterArea(e.target.value)}
+                  className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+                >
+                  <option value="all">Tất cả khu vực</option>
+                  {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+                <select
+                  value={filterFloor}
+                  onChange={(e) => setFilterFloor(e.target.value)}
+                  className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
+                >
+                  <option value="all">Tất cả tầng</option>
+                  {Array.from(new Set(rooms.map(r => r.floor))).sort((a, b) => Number(a) - Number(b)).map(f => (
+                    <option key={f} value={f}>Tầng {f}</option>
+                  ))}
+                </select>
+              </>
+            )}
             <select
               value={filterMonth}
               onChange={(e) => setFilterMonth(Number(e.target.value))}
@@ -361,7 +403,6 @@ export function Invoices() {
               ))}
             </select>
           </div>
-        </div>
       </section>
 
       {/* Invoice Table */}
@@ -370,8 +411,8 @@ export function Invoices() {
           <EmptyState
             icon={<FileText className="w-10 h-10" />}
             title="Chưa có hóa đơn nào"
-            description="Tạo hóa đơn đầu tiên cho người thuê phòng"
-            action={<Button onClick={openCreateModal}><Plus className="w-4 h-4" />Tạo hóa đơn</Button>}
+            description={isTenant ? "Bạn chưa có hóa đơn nào." : "Tạo hóa đơn đầu tiên cho người thuê phòng"}
+            action={!isTenant ? <Button onClick={openCreateModal}><Plus className="w-4 h-4" />Tạo hóa đơn</Button> : undefined}
           />
         </div>
       ) : (
@@ -416,23 +457,50 @@ export function Invoices() {
                     {invoice.due_date ? new Date(invoice.due_date).toLocaleDateString('vi-VN') : '—'}
                   </td>
                   <td className="px-7 py-5">
-                    <InvoiceStatusBadge status={invoice.status} />
+                    <InvoiceStatusBadge status={invoice.status} isTenant={isTenant} />
                   </td>
                   <td className="px-7 py-5">
                     <div className="flex items-center justify-end gap-2">
-                      {invoice.status === 'pending' && (
-                        <button onClick={() => handleMarkPaid(invoice)} className="px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg transition-colors">
-                          Đã thanh toán
-                        </button>
+                      {isTenant ? (
+                        <>
+                          {invoice.status === 'pending' && (
+                            <Button 
+                              size="sm"
+                              className="bg-[#A50064] hover:bg-[#80004d] text-white py-1.5 px-3 h-auto text-sm"
+                              onClick={() => setPayingInvoice(invoice)}
+                            >
+                              <CreditCard className="w-4 h-4 mr-2" />
+                              Thanh toán
+                            </Button>
+                          )}
+                          {invoice.status === 'waiting_confirmation' && (
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                              Chờ xác nhận
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {invoice.status === 'pending' && (
+                            <button onClick={() => handleMarkPaid(invoice)} className="px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg transition-colors">
+                              Đã thanh toán
+                            </button>
+                          )}
+                          {invoice.status === 'waiting_confirmation' && (
+                            <button onClick={() => handleConfirmPayment(invoice)} className="px-3 py-1.5 text-xs font-medium text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors">
+                              Xác nhận tiền vào
+                            </button>
+                          )}
+                          <button onClick={() => openEditModal(invoice)} disabled={invoice.status === 'paid'}
+                            className={`p-2 rounded-lg transition-colors ${invoice.status === 'paid' ? 'text-charcoal-200' : 'text-charcoal-400 hover:text-terra-600 hover:bg-terra-50'}`}>
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => openDeleteModal(invoice)} disabled={invoice.status === 'paid'}
+                            className={`p-2 rounded-lg transition-colors ${invoice.status === 'paid' ? 'text-charcoal-200' : 'text-charcoal-400 hover:text-red-600 hover:bg-red-50'}`}>
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
                       )}
-                      <button onClick={() => openEditModal(invoice)} disabled={invoice.status === 'paid'}
-                        className={`p-2 rounded-lg transition-colors ${invoice.status === 'paid' ? 'text-charcoal-200' : 'text-charcoal-400 hover:text-terra-600 hover:bg-terra-50'}`}>
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => openDeleteModal(invoice)} disabled={invoice.status === 'paid'}
-                        className={`p-2 rounded-lg transition-colors ${invoice.status === 'paid' ? 'text-charcoal-200' : 'text-charcoal-400 hover:text-rose-500 hover:bg-rose-50'}`}>
-                        <Trash2 className="w-4 h-4" />
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -469,13 +537,14 @@ export function Invoices() {
               ]}
             />
             <Input
-              label="Chỉ số điện nước (nếu có)"
+              label="Chỉ số điện nước (bắt buộc)"
               name="meter_reading_id"
               type="select"
+              required
               value={formData.meter_reading_id}
               onChange={handleReadingChange}
               options={[
-                { value: '', label: '-- Không sử dụng --' },
+                { value: '', label: '-- Chọn chỉ số --' },
                 ...readings
                   .filter((r) => r.room_id === formData.room_id)
                   .map((r) => ({
@@ -535,6 +604,7 @@ export function Invoices() {
               value={formData.electricity_cost}
               onChange={(v) => setFormData({ ...formData, electricity_cost: v })}
               min={0}
+              disabled={true}
             />
             <Input
               label="Tiền nước (VNĐ)"
@@ -543,6 +613,7 @@ export function Invoices() {
               value={formData.water_cost}
               onChange={(v) => setFormData({ ...formData, water_cost: v })}
               min={0}
+              disabled={true}
             />
             <Input
               label="Phí khác (VNĐ)"
@@ -551,6 +622,7 @@ export function Invoices() {
               value={formData.other_fees}
               onChange={(v) => setFormData({ ...formData, other_fees: v })}
               min={0}
+              disabled={true}
             />
           </div>
           <Input
@@ -617,11 +689,22 @@ export function Invoices() {
   );
 }
 
-function InvoiceStatusBadge({ status }: { status: string }) {
-  const variants: Record<string, 'warning' | 'success' | 'danger'> = {
-    pending: 'warning',
+function InvoiceStatusBadge({ status, isTenant }: { status: string, isTenant?: boolean }) {
+  const variants: Record<Invoice['status'], 'default' | 'success' | 'warning' | 'danger'> = {
+    pending: 'default',
     paid: 'success',
-    overdue: 'danger',
+    waiting_confirmation: 'warning',
+    overdue: isTenant ? 'warning' : 'danger',
   };
+  
+  if (isTenant && status === 'overdue') {
+    // Show as a warning badge with label 'Chưa thanh toán' for tenants instead of 'Quá hạn'
+    return (
+      <span className="inline-flex items-center justify-center font-medium px-2.5 py-1 text-sm bg-amber-100 text-amber-700 rounded-lg">
+        Chưa thanh toán
+      </span>
+    );
+  }
+  
   return <Badge status={status} variant={variants[status]} />;
 }
