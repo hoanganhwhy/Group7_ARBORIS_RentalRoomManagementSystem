@@ -3,11 +3,11 @@ import { Sidebar } from './components/ui/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { Rooms } from './pages/Rooms';
 import { Tenants } from './pages/Tenants';
-import { TenantAccounts } from './pages/TenantAccounts';
 import { MeterReadings } from './pages/MeterReadings';
 import { Invoices } from './pages/Invoices';
 import { Repairs } from './pages/Repairs';
 import type { Page } from './types';
+import { BankTransactionNotifier } from './components/BankTransactionNotifier';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
@@ -20,8 +20,6 @@ function App() {
         return <Rooms />;
       case 'tenants':
         return <Tenants />;
-      case 'tenant-accounts':
-        return <TenantAccounts />;
       case 'meter-readings':
         return <MeterReadings />;
       case 'invoices':
@@ -99,6 +97,7 @@ function App() {
         }} />
       </div>
 
+      <BankTransactionNotifier />
       <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
       <main className="flex-1 ml-72 min-h-screen relative" style={{ zIndex: 1 }}>
         <div className="py-10 px-12 max-w-6xl mx-auto">

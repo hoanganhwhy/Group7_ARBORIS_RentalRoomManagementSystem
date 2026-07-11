@@ -205,7 +205,7 @@ export function MeterReadings() {
       {/* Page Header */}
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Điện nước</h1>
+          <h1 className="text-3xl font-serif text-charcoal-900 tracking-wide">Điện nước</h1>
           <p className="text-charcoal-400 mt-2 text-sm">Nhập và theo dõi chỉ số điện nước hàng tháng</p>
         </div>
         <Button onClick={openCreateModal}>
@@ -229,20 +229,34 @@ export function MeterReadings() {
       ) : (
         <div className="bg-white rounded-2xl border border-charcoal-100 overflow-hidden shadow-card">
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="w-full">
               <thead>
-                <tr className="bg-cream-50/50 border-b border-cream-200 text-xs uppercase tracking-widest text-charcoal-500 font-semibold">
-                  <th className="px-4 py-3">Ngày</th>
-                  <th className="px-4 py-3">Phòng</th>
-                  <th className="px-4 py-3 text-center">Điện (kWh)</th>
-                  <th className="px-4 py-3 text-center">Tiền điện</th>
-                  <th className="px-4 py-3 text-center">Nước (m³)</th>
-                  <th className="px-4 py-3 text-center">Tiền nước</th>
-                  <th className="px-4 py-3 text-center">Tổng tiền</th>
-                  <th className="px-4 py-3 text-right">Thao tác</th>
+                <tr className="bg-cream-50 border-b border-charcoal-100">
+                  <th className="text-left px-6 py-4 text-sm font-semibold text-charcoal-600">
+                    Ngày
+                  </th>
+                  <th className="text-left px-6 py-4 text-sm font-semibold text-charcoal-600">
+                    Phòng
+                  </th>
+                  <th className="text-right px-6 py-4 text-sm font-semibold text-charcoal-600">
+                    Điện (kWh)
+                  </th>
+                  <th className="text-right px-6 py-4 text-sm font-semibold text-charcoal-600">
+                    Tiền điện
+                  </th>
+                  <th className="text-right px-6 py-4 text-sm font-semibold text-charcoal-600">
+                    Nước (m³)
+                  </th>
+                  <th className="text-right px-6 py-4 text-sm font-semibold text-charcoal-600">
+                    Tiền nước
+                  </th>
+                  <th className="text-right px-6 py-4 text-sm font-semibold text-charcoal-600">
+                    Tổng tiền
+                  </th>
+                  <th className="px-6 py-4"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-cream-100">
+              <tbody className="divide-y divide-charcoal-100">
                 {readings.map((reading) => {
                   const elecUsage = reading.electricity_new - reading.electricity_old;
                   const waterUsage = reading.water_new - reading.water_old;
@@ -251,61 +265,65 @@ export function MeterReadings() {
                   const total = elecCost + waterCost;
 
                   return (
-                    <tr key={reading.id} className="hover:bg-cream-50/50 transition-colors group">
-                      <td className="px-4 py-3 align-middle">
+                    <tr key={reading.id} className="hover:bg-cream-50 transition-colors">
+                      <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <PiCalendarBlankLight className="w-4 h-4 text-charcoal-400" />
-                          <span className="font-serif lining-nums tabular-nums text-charcoal-900 font-medium">
+                          <span className="text-charcoal-900 font-medium">
                             {new Date(reading.reading_date).toLocaleDateString('vi-VN')}
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 align-middle">
-                        <span className="font-serif lining-nums tabular-nums font-medium text-wood-700">P.{reading.room?.room_number || ''}</span>
+                      <td className="px-6 py-4">
+                        <Badge
+                          status={reading.room?.room_number || ''}
+                          variant="default"
+                          size="sm"
+                        />
                       </td>
-                      <td className="px-4 py-3 text-center align-middle">
-                        <div className="flex flex-col items-center gap-0.5">
-                          <div className="flex items-center justify-center gap-1.5">
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center justify-end gap-1.5">
                             <PiLightningLight className="w-4 h-4 text-amber-500" />
-                            <span className="font-serif lining-nums tabular-nums text-charcoal-900 font-semibold text-lg">{elecUsage}</span>
+                            <span className="text-charcoal-900 font-semibold">{elecUsage}</span>
                           </div>
-                          <div className="text-[10px] text-charcoal-400 font-mono tracking-wider">
+                          <div className="text-xs text-charcoal-400">
                             {reading.electricity_old} → {reading.electricity_new}
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-center align-middle">
-                        <span className="font-serif lining-nums tabular-nums text-charcoal-900 font-medium">{elecCost.toLocaleString('vi-VN')}đ</span>
+                      <td className="px-6 py-4 text-right font-medium text-charcoal-900">
+                        {elecCost.toLocaleString('vi-VN')}đ
                       </td>
-                      <td className="px-4 py-3 text-center align-middle">
-                        <div className="flex flex-col items-center gap-0.5">
-                          <div className="flex items-center justify-center gap-1.5">
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center justify-end gap-1.5">
                             <PiDropLight className="w-4 h-4 text-blue-500" />
-                            <span className="font-serif lining-nums tabular-nums text-charcoal-900 font-semibold text-lg">{waterUsage}</span>
+                            <span className="text-charcoal-900 font-semibold">{waterUsage}</span>
                           </div>
-                          <div className="text-[10px] text-charcoal-400 font-mono tracking-wider">
+                          <div className="text-xs text-charcoal-400">
                             {reading.water_old} → {reading.water_new}
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-center align-middle">
-                        <span className="font-serif lining-nums tabular-nums text-charcoal-900 font-medium">{waterCost.toLocaleString('vi-VN')}đ</span>
+                      <td className="px-6 py-4 text-right font-medium text-charcoal-900">
+                        {waterCost.toLocaleString('vi-VN')}đ
                       </td>
-                      <td className="px-4 py-3 text-center align-middle">
-                        <span className="font-serif lining-nums tabular-nums text-wood-700 font-bold text-lg">{total.toLocaleString('vi-VN')}đ</span>
+                      <td className="px-6 py-4 text-right font-bold text-wood-600">
+                        {total.toLocaleString('vi-VN')}đ
                       </td>
-                      <td className="px-4 py-3 align-middle text-right">
-                        <div className="flex justify-end items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => openEditModal(reading)}
-                            className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200"
+                            className="p-2 text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 rounded-xl transition-colors"
                             title="Sửa"
                           >
                             <PiPencilSimpleLight className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => openDeleteModal(reading)}
-                            className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200"
+                            className="p-2 text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
                             title="Xóa"
                           >
                             <PiTrashLight className="w-4 h-4" />
@@ -326,7 +344,7 @@ export function MeterReadings() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={editingReading ? 'Sửa chỉ số' : 'Nhập chỉ số điện nước'}
-        size="xl"
+        size="lg"
       >
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-2 gap-4">
@@ -356,35 +374,33 @@ export function MeterReadings() {
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Electricity Section */}
-            <div className="p-5 bg-amber-50 rounded-xl border border-amber-200 flex flex-col h-full">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 rounded-lg bg-amber-200 flex items-center justify-center">
-                  <PiLightningLight className="w-4 h-4 text-amber-700" />
-                </div>
-                <h4 className="font-semibold text-charcoal-900">Điện</h4>
+          {/* Electricity Section */}
+          <div className="p-5 bg-amber-50 rounded-xl border border-amber-200">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-8 h-8 rounded-lg bg-amber-200 flex items-center justify-center">
+                <PiLightningLight className="w-4 h-4 text-amber-700" />
               </div>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <Input
-                  label="Chỉ số cũ (kWh)"
-                  name="electricity_old"
-                  type="number"
-                  value={formData.electricity_old}
-                  onChange={(v) => setFormData({ ...formData, electricity_old: v })}
-                  min={0}
-                  disabled={loadingPrevious}
-                />
-                <Input
-                  label="Chỉ số mới (kWh)"
-                  name="electricity_new"
-                  type="number"
-                  value={formData.electricity_new}
-                  onChange={(v) => setFormData({ ...formData, electricity_new: v })}
-                  min={formData.electricity_old}
-                  required
-                />
-              </div>
+              <h4 className="font-semibold text-charcoal-900">Điện</h4>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <Input
+                label="Chỉ số cũ (kWh)"
+                name="electricity_old"
+                type="number"
+                value={formData.electricity_old}
+                onChange={(v) => setFormData({ ...formData, electricity_old: v })}
+                min={0}
+                disabled={loadingPrevious}
+              />
+              <Input
+                label="Chỉ số mới (kWh)"
+                name="electricity_new"
+                type="number"
+                value={formData.electricity_new}
+                onChange={(v) => setFormData({ ...formData, electricity_new: v })}
+                min={Number(formData.electricity_old) || 0}
+                required
+              />
               <Input
                 label="Đơn giá (đ/kWh)"
                 name="electricity_price"
@@ -393,47 +409,47 @@ export function MeterReadings() {
                 onChange={(v) => setFormData({ ...formData, electricity_price_per_unit: v })}
                 min={0}
               />
-              {hasElecError && (
-                <p className="mt-3 text-sm text-rose-600 font-medium">
-                  Chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ ({formData.electricity_old} kWh)
-                </p>
-              )}
-              <div className="mt-auto pt-4 flex items-center justify-between text-sm">
-                <span className="text-charcoal-600">Thành tiền:</span>
-                <span className={`font-bold ${hasElecError ? 'text-rose-500' : 'text-charcoal-900'}`}>
-                  {hasElecError ? 'Chỉ số không hợp lệ' : `${electricityCost.toLocaleString('vi-VN')}đ (${electricityUsage} kWh)`}
-                </span>
-              </div>
             </div>
+            {hasElecError && (
+              <p className="mt-3 text-sm text-rose-600 font-medium">
+                Chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ ({formData.electricity_old} kWh)
+              </p>
+            )}
+            <div className="mt-4 flex items-center justify-between text-sm">
+              <span className="text-charcoal-600">Thành tiền:</span>
+              <span className={`font-bold ${hasElecError ? 'text-rose-500' : 'text-charcoal-900'}`}>
+                {hasElecError ? 'Chỉ số không hợp lệ' : `${electricityCost.toLocaleString('vi-VN')}đ (${electricityUsage} kWh)`}
+              </span>
+            </div>
+          </div>
 
-            {/* Water Section */}
-            <div className="p-5 bg-blue-50 rounded-xl border border-blue-200 flex flex-col h-full">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 rounded-lg bg-blue-200 flex items-center justify-center">
-                  <PiDropLight className="w-4 h-4 text-blue-700" />
-                </div>
-                <h4 className="font-semibold text-charcoal-900">Nước</h4>
+          {/* Water Section */}
+          <div className="p-5 bg-blue-50 rounded-xl border border-blue-200">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-8 h-8 rounded-lg bg-blue-200 flex items-center justify-center">
+                <PiDropLight className="w-4 h-4 text-blue-700" />
               </div>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <Input
-                  label="Chỉ số cũ (m³)"
-                  name="water_old"
-                  type="number"
-                  value={formData.water_old}
-                  onChange={(v) => setFormData({ ...formData, water_old: v })}
-                  min={0}
-                  disabled={loadingPrevious}
-                />
-                <Input
-                  label="Chỉ số mới (m³)"
-                  name="water_new"
-                  type="number"
-                  value={formData.water_new}
-                  onChange={(v) => setFormData({ ...formData, water_new: v })}
-                  min={formData.water_old}
-                  required
-                />
-              </div>
+              <h4 className="font-semibold text-charcoal-900">Nước</h4>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <Input
+                label="Chỉ số cũ (m³)"
+                name="water_old"
+                type="number"
+                value={formData.water_old}
+                onChange={(v) => setFormData({ ...formData, water_old: v })}
+                min={0}
+                disabled={loadingPrevious}
+              />
+              <Input
+                label="Chỉ số mới (m³)"
+                name="water_new"
+                type="number"
+                value={formData.water_new}
+                onChange={(v) => setFormData({ ...formData, water_new: v })}
+                min={Number(formData.water_old) || 0}
+                required
+              />
               <Input
                 label="Đơn giá (đ/m³)"
                 name="water_price"
@@ -442,17 +458,17 @@ export function MeterReadings() {
                 onChange={(v) => setFormData({ ...formData, water_price_per_unit: v })}
                 min={0}
               />
-              {hasWaterError && (
-                <p className="mt-3 text-sm text-rose-600 font-medium">
-                  Chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ ({formData.water_old} m³)
-                </p>
-              )}
-              <div className="mt-auto pt-4 flex items-center justify-between text-sm">
-                <span className="text-charcoal-600">Thành tiền:</span>
-                <span className={`font-bold ${hasWaterError ? 'text-rose-500' : 'text-charcoal-900'}`}>
-                  {hasWaterError ? 'Chỉ số không hợp lệ' : `${waterCost.toLocaleString('vi-VN')}đ (${waterUsage} m³)`}
-                </span>
-              </div>
+            </div>
+            {hasWaterError && (
+              <p className="mt-3 text-sm text-rose-600 font-medium">
+                Chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ ({formData.water_old} m³)
+              </p>
+            )}
+            <div className="mt-4 flex items-center justify-between text-sm">
+              <span className="text-charcoal-600">Thành tiền:</span>
+              <span className={`font-bold ${hasWaterError ? 'text-rose-500' : 'text-charcoal-900'}`}>
+                {hasWaterError ? 'Chỉ số không hợp lệ' : `${waterCost.toLocaleString('vi-VN')}đ (${waterUsage} m³)`}
+              </span>
             </div>
           </div>
 

@@ -1,36 +1,23 @@
-node_modules/
-dist/
-.env
-.env.local
-.env.*.local
-.node-portable/
-.bolt/
-npm
+logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# temporary patch scripts
-fix*.cjs
-fix*.py
-update*.cjs
-update*.py
-apply*.cjs
-apply*.py
-patch*.py
-recover*.py
-style*.py
-find*.cjs
-finalize.py
-undo.py
-center_meter.py
-convert_repairs_table.py
-remove_checkbox.py
-refactor*.cjs
-refactor*.py
+node_modules
+dist
+dist-ssr
+*.local
 
-# local test/export files
-*.csv
-Tenants_recovery.tsx
-
-coverage/
-server/coverage/
-*.cjs
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.env

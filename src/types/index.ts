@@ -25,9 +25,6 @@ export interface Tenant {
   address: string | null;
   emergency_contact: string | null;
   notes: string | null;
-  username?: string | null;
-  password?: string | null;
-  google_email?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -105,4 +102,42 @@ export interface RepairRequest {
   tenant?: Tenant;
 }
 
-export type Page = 'dashboard' | 'rooms' | 'tenants' | 'tenant-accounts' | 'meter-readings' | 'invoices' | 'repairs';
+
+export interface BankTransaction {
+  id: string;
+  provider: string;
+  provider_transaction_id: string;
+  reference_code: string | null;
+  gateway: string | null;
+  account_number: string | null;
+  transfer_type: 'in' | 'out';
+  amount: number;
+  accumulated: number | null;
+  content: string | null;
+  payment_code: string | null;
+  invoice_id: string | null;
+  transaction_date: string | null;
+  created_at: string;
+}
+
+export interface InvoicePaymentInfo {
+  invoice_id: string;
+  room_number: string;
+  tenant_name: string | null;
+  invoice_status: Invoice['status'];
+  payment_status: 'pending' | 'partial' | 'paid';
+  payment_code: string;
+  required_amount: number;
+  received_amount: number;
+  remaining_amount: number;
+  bank: {
+    bank_id: string;
+    account_number: string;
+    account_name: string;
+  };
+  qr_locked: boolean;
+  qr_url: string | null;
+  transactions: BankTransaction[];
+}
+
+export type Page = 'dashboard' | 'rooms' | 'tenants' | 'meter-readings' | 'invoices' | 'repairs';

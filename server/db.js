@@ -107,9 +107,6 @@ function initDatabase() {
         dia_chi TEXT,
         lien_he_khan_cap TEXT,
         ghi_chu TEXT,
-        username TEXT,
-        password TEXT,
-        google_email TEXT,
         ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP,
         ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP
       )
@@ -193,6 +190,40 @@ function initDatabase() {
       )
     `);
 
+    // 7. thanh_toan_hoa_don Table (Mã QR và tiến độ thanh toán từng hóa đơn)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS thanh_toan_hoa_don (
+        hoa_don_id TEXT PRIMARY KEY REFERENCES hoa_don(id) ON DELETE CASCADE,
+        ma_thanh_toan TEXT NOT NULL UNIQUE,
+        so_tien_yeu_cau REAL NOT NULL DEFAULT 0,
+        so_tien_da_nhan REAL NOT NULL DEFAULT 0,
+        trang_thai TEXT NOT NULL DEFAULT 'pending' CHECK (trang_thai IN ('pending', 'partial', 'paid')),
+        ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP,
+        ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 8. giao_dich_ngan_hang Table (Biến động số dư nhận từ SePay)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS giao_dich_ngan_hang (
+        id TEXT PRIMARY KEY,
+        nha_cung_cap TEXT NOT NULL DEFAULT 'sepay',
+        ma_giao_dich_ncc TEXT NOT NULL UNIQUE,
+        ma_tham_chieu TEXT,
+        ngan_hang TEXT,
+        so_tai_khoan TEXT,
+        loai_giao_dich TEXT NOT NULL CHECK (loai_giao_dich IN ('in', 'out')),
+        so_tien REAL NOT NULL DEFAULT 0,
+        so_du_sau_giao_dich REAL,
+        noi_dung TEXT,
+        ma_thanh_toan TEXT,
+        hoa_don_id TEXT REFERENCES hoa_don(id) ON DELETE SET NULL,
+        thoi_gian_giao_dich TEXT,
+        du_lieu_goc TEXT,
+        ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Indexes (Chỉ mục tối ưu)
     db.run(`CREATE INDEX IF NOT EXISTS idx_rooms_status ON phong(trang_thai);`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_room_assignments_room ON hop_dong_thue(phong_id);`);
@@ -205,6 +236,9 @@ function initDatabase() {
     db.run(`CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON hoa_don(han_thanh_toan);`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_invoices_month_year ON hoa_don(nam_hoa_don, thang_hoa_don);`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_room_assignments_contract_end ON hop_dong_thue(ngay_het_han_hop_dong);`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_payment_code ON thanh_toan_hoa_don(ma_thanh_toan);`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_bank_transactions_invoice ON giao_dich_ngan_hang(hoa_don_id);`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_bank_transactions_date ON giao_dich_ngan_hang(thoi_gian_giao_dich);`);
 
       // Seed sample data if phong table is empty
       db.get("SELECT COUNT(*) as count FROM phong", (err, row) => {

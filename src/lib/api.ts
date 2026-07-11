@@ -1,4 +1,4 @@
-import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest } from '../types';
+import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest, InvoicePaymentInfo, BankTransaction } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -203,6 +203,15 @@ export async function markInvoicePaid(id: string): Promise<Invoice> {
   return request<Invoice>(`/invoices/${id}/paid`, {
     method: 'PUT',
   });
+}
+
+
+export async function getInvoicePayment(id: string): Promise<InvoicePaymentInfo> {
+  return request<InvoicePaymentInfo>(`/invoices/${id}/payment`);
+}
+
+export async function getBankTransactions(limit: number = 20): Promise<BankTransaction[]> {
+  return request<BankTransaction[]>(`/bank-transactions?limit=${encodeURIComponent(limit)}`);
 }
 
 // Repair Requests API

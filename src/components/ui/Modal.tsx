@@ -49,7 +49,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="max-h-[85vh] overflow-y-auto scrollbar-hide">{children}</div>
+        <div className="max-h-[85vh] overflow-y-auto">{children}</div>
       </div>
     </div>,
     document.body

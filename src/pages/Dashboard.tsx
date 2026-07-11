@@ -6,8 +6,6 @@ import {
   PiClockLight, 
   PiWrenchLight, 
   PiReceiptLight, 
-  PiTrendUpLight, 
-  PiSparkleLight,
   PiArrowRightLight,
   PiWarningCircleLight,
   PiFileTextLight,
@@ -87,7 +85,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
         <div className="absolute inset-0 bg-gradient-to-r from-charcoal-900/90 via-charcoal-900/60 to-transparent" />
         
         <div className="absolute inset-0 p-6 flex flex-col justify-center max-w-3xl">
-          <h1 className="text-3xl font-serif lining-nums tabular-nums text-white tracking-wide leading-tight drop-shadow-sm mb-4">
+          <h1 className="text-3xl font-serif text-white tracking-wide leading-tight drop-shadow-sm mb-4">
             Tinh Hoa Không Gian Sống
           </h1>
           <div className="flex items-center gap-3">
@@ -123,7 +121,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
                   <PiFileTextLight className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="font-serif lining-nums tabular-nums font-medium text-charcoal-900">{(stats as any).expiringContracts.length} Hợp đồng</p>
+                  <p className="font-serif font-medium text-charcoal-900">{(stats as any).expiringContracts.length} Hợp đồng</p>
                   <p className="text-xs text-charcoal-500 mt-0.5">Sắp hết hạn (30 ngày)</p>
                 </div>
               </div>
@@ -137,7 +135,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
                   <PiUsersLight className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="font-serif lining-nums tabular-nums font-medium text-charcoal-900">{(stats as any).missingIdTenants} Khách thuê</p>
+                  <p className="font-serif font-medium text-charcoal-900">{(stats as any).missingIdTenants} Khách thuê</p>
                   <p className="text-xs text-charcoal-500 mt-0.5">Thiếu CCCD/CMND</p>
                 </div>
               </div>
@@ -151,7 +149,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
                   <PiReceiptLight className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="font-serif lining-nums tabular-nums font-medium text-charcoal-900">{stats.overdueInvoices} Hóa đơn</p>
+                  <p className="font-serif font-medium text-charcoal-900">{stats.overdueInvoices} Hóa đơn</p>
                   <p className="text-xs text-charcoal-500 mt-0.5">Quá hạn thanh toán</p>
                 </div>
               </div>
@@ -163,7 +161,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
       {/* Stats Section */}
       <section className="space-y-3">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-lg font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Thống Kê Hoạt Động</h2>
+          <h2 className="text-lg font-serif text-charcoal-900 tracking-wide">Thống Kê Hoạt Động</h2>
         </div>
 
         <div className="grid grid-cols-4 gap-5">
@@ -200,7 +198,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
       {/* Financial Section */}
       <section className="space-y-3">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-lg font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Tình Hình Tài Chính</h2>
+          <h2 className="text-lg font-serif text-charcoal-900 tracking-wide">Tình Hình Tài Chính</h2>
         </div>
 
         <div className="grid grid-cols-3 gap-5">
@@ -268,7 +266,7 @@ function DataCard({
         </div>
       </div>
       <div>
-        <p className={`text-3xl font-serif lining-nums tabular-nums mb-1 tracking-tight ${accent ? 'text-wood-700' : 'text-charcoal-900'}`}>
+        <p className={`text-3xl font-serif mb-1 tracking-tight ${accent ? 'text-wood-700' : 'text-charcoal-900'}`}>
           {value}
         </p>
         <p className="text-xs text-charcoal-400 font-medium uppercase tracking-widest">{label}</p>
@@ -313,7 +311,7 @@ function FinancialCard({
         </div>
       </div>
       <div>
-        <p className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 mb-1 tracking-tight">
+        <p className="text-3xl font-serif text-charcoal-900 mb-1 tracking-tight">
           {unit === 'count' ? `${value} HĐ` : `${value.toLocaleString('vi-VN')}đ`}
         </p>
         <p className="text-xs text-charcoal-500 font-medium uppercase tracking-widest">{label}</p>
@@ -330,7 +328,7 @@ function RecentInvoices({ invoices, onNavigate }: { invoices: Invoice[]; onNavig
         className="px-6 py-5 border-b border-cream-200 flex items-center justify-between cursor-pointer hover:bg-cream-50 transition-colors"
       >
         <div>
-          <h3 className="text-lg font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Hóa đơn gần đây</h3>
+          <h3 className="text-lg font-serif text-charcoal-900 tracking-wide">Hóa đơn gần đây</h3>
           <p className="text-xs text-charcoal-400 mt-0.5">Các hóa đơn mới nhất trong hệ thống</p>
         </div>
         <div className="flex items-center gap-2">
@@ -349,17 +347,17 @@ function RecentInvoices({ invoices, onNavigate }: { invoices: Invoice[]; onNavig
           invoices.slice(0, 5).map((invoice) => (
             <div key={invoice.id} className="px-6 py-4 flex items-center justify-between hover:bg-cream-50/50 transition-colors">
               <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-full bg-cream-50 border border-cream-200 flex items-center justify-center text-xs font-medium text-charcoal-600 font-serif lining-nums tabular-nums">
+                <div className="w-10 h-10 rounded-full bg-cream-50 border border-cream-200 flex items-center justify-center text-xs font-medium text-charcoal-600 font-serif">
                   {invoice.invoice_month}/{invoice.invoice_year.toString().slice(-2)}
                 </div>
                 <div>
-                  <p className="font-medium text-charcoal-900 font-serif lining-nums tabular-nums">Phòng {invoice.room?.room_number}</p>
+                  <p className="font-medium text-charcoal-900 font-serif">Phòng {invoice.room?.room_number}</p>
                   <p className="text-xs text-charcoal-400 mt-0.5">{invoice.tenant?.full_name}</p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">
-                  <p className="font-semibold text-charcoal-900 font-serif lining-nums tabular-nums">{invoice.total_amount.toLocaleString('vi-VN')}đ</p>
+                  <p className="font-semibold text-charcoal-900 font-serif">{invoice.total_amount.toLocaleString('vi-VN')}đ</p>
                   <Badge status={invoice.status} variant={invoice.status === 'paid' ? 'success' : invoice.status === 'overdue' ? 'danger' : 'warning'} size="sm" />
                 </div>
                 <PiArrowRightLight className="w-4 h-4 text-charcoal-300 opacity-0 group-hover/container:opacity-100 transition-opacity" />
@@ -380,7 +378,7 @@ function RecentRepairs({ repairs, onNavigate }: { repairs: RepairRequest[]; onNa
         className="px-6 py-5 border-b border-cream-200 flex items-center justify-between cursor-pointer hover:bg-cream-50 transition-colors"
       >
         <div>
-          <h3 className="text-lg font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Yêu cầu sửa chữa</h3>
+          <h3 className="text-lg font-serif text-charcoal-900 tracking-wide">Yêu cầu sửa chữa</h3>
           <p className="text-xs text-charcoal-400 mt-0.5">Các yêu cầu mới nhất từngười thuê</p>
         </div>
         <div className="flex items-center gap-2">
@@ -403,7 +401,7 @@ function RecentRepairs({ repairs, onNavigate }: { repairs: RepairRequest[]; onNa
                   <PiWrenchLight className="w-4 h-4 text-charcoal-600" />
                 </div>
                 <div className="min-w-0">
-                  <p className="font-medium text-charcoal-900 truncate font-serif lining-nums tabular-nums">{repair.title}</p>
+                  <p className="font-medium text-charcoal-900 truncate font-serif">{repair.title}</p>
                   <p className="text-xs text-charcoal-400 mt-0.5">Phòng {repair.room?.room_number}</p>
                 </div>
               </div>
@@ -419,21 +417,3 @@ function RecentRepairs({ repairs, onNavigate }: { repairs: RepairRequest[]; onNa
   );
 }
 
-function InvoiceBadge({ status }: { status: string }) {
-  const variants: Record<string, 'success' | 'warning' | 'danger'> = {
-    paid: 'success',
-    pending: 'warning',
-    overdue: 'danger',
-  };
-  return <Badge status={status} variant={variants[status] || 'default'} size="sm" />;
-}
-
-function RepairBadge({ status }: { status: string }) {
-  const variants: Record<string, 'info' | 'warning' | 'success' | 'default'> = {
-    new: 'info',
-    in_progress: 'warning',
-    resolved: 'success',
-    closed: 'default',
-  };
-  return <Badge status={status} variant={variants[status]} size="sm" />;
-}

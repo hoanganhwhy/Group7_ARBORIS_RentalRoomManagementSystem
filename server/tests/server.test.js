@@ -1,12 +1,19 @@
 import request from 'supertest';
 import app from '../server.js';
-import { closeDatabase, query, run, dbReady } from '../db.js';
+import { closeDatabase, run, dbReady } from '../db.js';
 
 describe('HostelMate API Endpoints & Business Logic Unit Tests', () => {
   
   beforeAll(async () => {
     // Wait until SQLite schema creation and sample data seeding are completed
     await dbReady;
+    process.env.BANK_ID = '970422';
+    process.env.BANK_ACCOUNT_NO = '0123456789';
+    process.env.BANK_ACCOUNT_NAME = 'HOSTELMATE TEST';
+    process.env.VIETQR_TEMPLATE = 'compact2';
+    process.env.PAYMENT_PREFIX = 'HM';
+    process.env.SEPAY_WEBHOOK_API_KEY = 'test-sepay-key';
+    process.env.SEPAY_ALLOWED_ACCOUNT_NUMBERS = '0123456789';
   });
 
   afterAll(async () => {
@@ -266,6 +273,22 @@ describe('HostelMate API Endpoints & Business Logic Unit Tests', () => {
       expect(res.body.paid_date).toBeDefined();
     });
 
+    test('PUT /api/invoices/:id - Should block editing a paid invoice', async () => {
+      const res = await request(app)
+        .put('/api/invoices/inv_test')
+        .send({ notes: 'Không được phép sửa' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('đã bị khóa');
+    });
+
+    test('DELETE /api/invoices/:id - Should block deleting a paid invoice', async () => {
+      const res = await request(app).delete('/api/invoices/inv_test');
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('đã bị khóa');
+    });
+
     test('POST /api/invoices/mark-overdue - Should scan and mark overdue invoices', async () => {
       const res = await request(app).post('/api/invoices/mark-overdue');
       expect(res.status).toBe(200);
@@ -281,6 +304,174 @@ describe('HostelMate API Endpoints & Business Logic Unit Tests', () => {
 
       const res = await request(app).delete(`/api/invoices/${id}`);
       expect(res.status).toBe(204);
+    });
+  });
+
+  describe('4B. VietQR & SePay payment flow', () => {
+    const invoiceId = 'inv_qr_test';
+    let paymentCode = '';
+
+    beforeAll(async () => {
+      await run(`
+        INSERT INTO hoa_don (
+          id, phong_id, khach_thue_id, thang_hoa_don, nam_hoa_don,
+          tien_phong, tong_tien, trang_thai, han_thanh_toan
+        ) VALUES (?, 'r1', 't1', 11, 2045, 3000000, 3000000, 'pending', '2045-11-15')
+      `, [invoiceId]);
+
+      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
+      paymentCode = paymentRes.body.payment_code;
+    });
+
+    test('GET /api/invoices/:id/payment - Should create VietQR payment information', async () => {
+      const res = await request(app).get(`/api/invoices/${invoiceId}/payment`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.payment_code).toMatch(/^HM[A-F0-9]{24}$/);
+      expect(res.body.required_amount).toBe(3000000);
+      expect(res.body.remaining_amount).toBe(3000000);
+      expect(res.body.qr_url).toContain('https://img.vietqr.io/image/970422-0123456789-compact2.png');
+      expect(res.body.qr_url).toContain(encodeURIComponent(res.body.payment_code));
+    });
+
+    test('POST /api/webhooks/sepay - Should reject an invalid API key', async () => {
+      const res = await request(app)
+        .post('/api/webhooks/sepay')
+        .set('Authorization', 'Apikey wrong-key')
+        .send({
+          id: 9000,
+          gateway: 'MB',
+          transactionDate: '2045-11-01 08:00:00',
+          accountNumber: '0123456789',
+          content: paymentCode,
+          transferType: 'in',
+          transferAmount: 1000000,
+          accumulated: 1000000,
+        });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+    });
+
+    test('POST /api/webhooks/sepay - Should record a partial payment', async () => {
+      const res = await request(app)
+        .post('/api/webhooks/sepay')
+        .set('Authorization', 'Apikey test-sepay-key')
+        .send({
+          id: 9001,
+          gateway: 'MB',
+          transactionDate: '2045-11-01 08:01:00',
+          accountNumber: '0123456789',
+          code: paymentCode,
+          content: `THANH TOAN ${paymentCode}`,
+          transferType: 'in',
+          transferAmount: 1000000,
+          accumulated: 5000000,
+          referenceCode: 'FT20450001',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.matched_invoice).toBe(invoiceId);
+      expect(res.body.received_amount).toBe(1000000);
+      expect(res.body.invoice_paid).toBe(false);
+
+      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
+      expect(paymentRes.body.payment_status).toBe('partial');
+      expect(paymentRes.body.remaining_amount).toBe(2000000);
+    });
+
+    test('POST /api/webhooks/sepay - Should ignore a duplicate transaction', async () => {
+      const duplicate = await request(app)
+        .post('/api/webhooks/sepay')
+        .set('Authorization', 'Apikey test-sepay-key')
+        .send({
+          id: 9001,
+          gateway: 'MB',
+          transactionDate: '2045-11-01 08:01:00',
+          accountNumber: '0123456789',
+          code: paymentCode,
+          content: `THANH TOAN ${paymentCode}`,
+          transferType: 'in',
+          transferAmount: 1000000,
+          accumulated: 5000000,
+          referenceCode: 'FT20450001',
+        });
+
+      expect(duplicate.status).toBe(200);
+      expect(duplicate.body.duplicate).toBe(true);
+
+      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
+      expect(paymentRes.body.received_amount).toBe(1000000);
+    });
+
+    test('POST /api/webhooks/sepay - Should mark the invoice paid after enough money arrives', async () => {
+      const res = await request(app)
+        .post('/api/webhooks/sepay')
+        .set('Authorization', 'Apikey test-sepay-key')
+        .send({
+          id: 9002,
+          gateway: 'MB',
+          transactionDate: '2045-11-01 08:02:00',
+          accountNumber: '0123456789',
+          content: `THANH TOAN PHAN CON LAI ${paymentCode}`,
+          transferType: 'in',
+          transferAmount: 2000000,
+          accumulated: 7000000,
+          referenceCode: 'FT20450002',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.invoice_paid).toBe(true);
+      expect(res.body.received_amount).toBe(3000000);
+
+      const invoiceRes = await request(app).get(`/api/invoices/${invoiceId}`);
+      expect(invoiceRes.body.status).toBe('paid');
+
+      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
+      expect(paymentRes.body.payment_status).toBe('paid');
+      expect(paymentRes.body.remaining_amount).toBe(0);
+      expect(paymentRes.body.qr_locked).toBe(true);
+      expect(paymentRes.body.qr_url).toBeNull();
+      expect(paymentRes.body.transactions).toHaveLength(2);
+
+      const transactionsRes = await request(app).get('/api/bank-transactions?limit=10');
+      expect(transactionsRes.status).toBe(200);
+      expect(transactionsRes.body.some((item) => item.invoice_id === invoiceId)).toBe(true);
+    });
+
+    test('POST /api/webhooks/sepay - Should not re-apply a paid invoice code', async () => {
+      const res = await request(app)
+        .post('/api/webhooks/sepay')
+        .set('Authorization', 'Apikey test-sepay-key')
+        .send({
+          id: 9003,
+          gateway: 'MB',
+          transactionDate: '2045-11-01 08:03:00',
+          accountNumber: '0123456789',
+          content: `CHUYEN NHAM LAN NUA ${paymentCode}`,
+          transferType: 'in',
+          transferAmount: 500000,
+          accumulated: 7500000,
+          referenceCode: 'FT20450003',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.matched_invoice).toBeNull();
+      expect(res.body.received_amount).toBe(0);
+      expect(res.body.invoice_paid).toBe(false);
+
+      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
+      expect(paymentRes.body.received_amount).toBe(3000000);
+      expect(paymentRes.body.transactions).toHaveLength(2);
+
+      const transactionsRes = await request(app).get('/api/bank-transactions?limit=10');
+      const reusedCodeTransaction = transactionsRes.body.find(
+        (item) => item.provider_transaction_id === 'sepay:9003'
+      );
+      expect(reusedCodeTransaction).toBeDefined();
+      expect(reusedCodeTransaction.invoice_id).toBeNull();
     });
   });
 

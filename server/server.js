@@ -1,3 +1,4 @@
+import './env.js';
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
@@ -11,6 +12,95 @@ app.use(express.json());
 
 // Helper function to generate UUID
 const generateId = () => crypto.randomUUID();
+
+
+const sanitizePaymentPrefix = (value) => {
+  const sanitized = String(value || 'HM').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  return sanitized || 'HM';
+};
+
+const getPaymentPrefix = () => sanitizePaymentPrefix(process.env.PAYMENT_PREFIX);
+
+const createPaymentCode = (invoiceId) => {
+  const digest = crypto.createHash('sha256').update(String(invoiceId)).digest('hex').slice(0, 24).toUpperCase();
+  return `${getPaymentPrefix()}${digest}`;
+};
+
+const getBankConfig = () => ({
+  bankId: String(process.env.BANK_ID || '').trim(),
+  accountNumber: String(process.env.BANK_ACCOUNT_NO || '').trim(),
+  accountName: String(process.env.BANK_ACCOUNT_NAME || '').trim(),
+  template: String(process.env.VIETQR_TEMPLATE || 'compact2').trim() || 'compact2',
+});
+
+const buildVietQrUrl = ({ bankId, accountNumber, accountName, template }, amount, paymentCode) => {
+  const safeBankId = encodeURIComponent(bankId);
+  const safeAccount = encodeURIComponent(accountNumber);
+  const safeTemplate = encodeURIComponent(template);
+  const params = new URLSearchParams({
+    amount: String(Math.max(0, Math.round(Number(amount) || 0))),
+    addInfo: paymentCode,
+    accountName,
+  });
+  return `https://img.vietqr.io/image/${safeBankId}-${safeAccount}-${safeTemplate}.png?${params.toString()}`;
+};
+
+const ensureInvoicePayment = async (invoice) => {
+  const paymentCode = createPaymentCode(invoice.id);
+  await run(`
+    INSERT OR IGNORE INTO thanh_toan_hoa_don
+      (hoa_don_id, ma_thanh_toan, so_tien_yeu_cau, so_tien_da_nhan, trang_thai)
+    VALUES (?, ?, ?, 0, 'pending')
+  `, [invoice.id, paymentCode, Number(invoice.tong_tien) || 0]);
+
+  await run(`
+    UPDATE thanh_toan_hoa_don
+    SET so_tien_yeu_cau = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+    WHERE hoa_don_id = ?
+  `, [Number(invoice.tong_tien) || 0, invoice.id]);
+
+  return queryOne('SELECT * FROM thanh_toan_hoa_don WHERE hoa_don_id = ?', [invoice.id]);
+};
+
+const secureEqual = (actual, expected) => {
+  const actualBuffer = Buffer.from(String(actual));
+  const expectedBuffer = Buffer.from(String(expected));
+  if (actualBuffer.length !== expectedBuffer.length) return false;
+  return crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+};
+
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const extractPaymentCode = (payload) => {
+  const prefix = getPaymentPrefix();
+  const pattern = new RegExp(`${escapeRegex(prefix)}[A-F0-9]{24}`, 'i');
+  const candidates = [payload?.code, payload?.content, payload?.description]
+    .filter(Boolean)
+    .map((value) => String(value));
+
+  for (const candidate of candidates) {
+    const match = candidate.match(pattern);
+    if (match) return match[0].toUpperCase();
+  }
+  return null;
+};
+
+const mapBankTransaction = (item) => ({
+  id: item.id,
+  provider: item.nha_cung_cap,
+  provider_transaction_id: item.ma_giao_dich_ncc,
+  reference_code: item.ma_tham_chieu,
+  gateway: item.ngan_hang,
+  account_number: item.so_tai_khoan,
+  transfer_type: item.loai_giao_dich,
+  amount: Number(item.so_tien) || 0,
+  accumulated: item.so_du_sau_giao_dich === null ? null : Number(item.so_du_sau_giao_dich),
+  content: item.noi_dung,
+  payment_code: item.ma_thanh_toan,
+  invoice_id: item.hoa_don_id,
+  transaction_date: item.thoi_gian_giao_dich,
+  created_at: item.ngay_tao,
+});
 
 // ----------------- SCHEMA MAPPERS (Vietnamese DB -> English API) -----------------
 const mapRoom = (r) => {
@@ -41,9 +131,6 @@ const mapTenant = (t) => {
     address: t.dia_chi,
     emergency_contact: t.lien_he_khan_cap,
     notes: t.ghi_chu,
-    username: t.username,
-    password: t.password,
-    google_email: t.google_email,
     created_at: t.ngay_tao,
     updated_at: t.ngay_cap_nhat
   };
@@ -329,12 +416,12 @@ app.get('/api/tenants/:id', async (req, res) => {
 app.post('/api/tenants', async (req, res) => {
   try {
     const id = generateId();
-    const { full_name, phone = '', email = '', id_card_number = '', date_of_birth = '', address = '', emergency_contact = '', notes = '', username = null, password = null, google_email = null } = req.body;
+    const { full_name, phone = '', email = '', id_card_number = '', date_of_birth = '', address = '', emergency_contact = '', notes = '' } = req.body;
     
     await run(`
-      INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email, so_cccd, ngay_sinh, dia_chi, lien_he_khan_cap, ghi_chu, username, password, google_email)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes, username, password, google_email]);
+      INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email, so_cccd, ngay_sinh, dia_chi, lien_he_khan_cap, ghi_chu)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes]);
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [id]);
     res.status(201).json(mapTenant(tenant));
@@ -345,7 +432,7 @@ app.post('/api/tenants', async (req, res) => {
 
 app.put('/api/tenants/:id', async (req, res) => {
   try {
-    const { full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes, username, password, google_email } = req.body;
+    const { full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes } = req.body;
     const existing = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Tenant not found' });
 
@@ -358,16 +445,13 @@ app.put('/api/tenants/:id', async (req, res) => {
       dia_chi: address !== undefined ? address : existing.dia_chi,
       lien_he_khan_cap: emergency_contact !== undefined ? emergency_contact : existing.lien_he_khan_cap,
       ghi_chu: notes !== undefined ? notes : existing.ghi_chu,
-      username: username !== undefined ? username : existing.username,
-      password: password !== undefined ? password : existing.password,
-      google_email: google_email !== undefined ? google_email : existing.google_email,
     };
 
     await run(`
       UPDATE khach_thue 
-      SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, lien_he_khan_cap = ?, ghi_chu = ?, username = ?, password = ?, google_email = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, lien_he_khan_cap = ?, ghi_chu = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, updated.lien_he_khan_cap, updated.ghi_chu, updated.username, updated.password, updated.google_email, req.params.id]);
+    `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, updated.lien_he_khan_cap, updated.ghi_chu, req.params.id]);
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
     res.json(mapTenant(tenant));
@@ -406,7 +490,10 @@ app.post('/api/room_assignments', async (req, res) => {
     }
 
     // Check if tenant already has an active assignment in a DIFFERENT room
-    // (Removed restriction: Tenants can now rent multiple rooms)
+    const existingDiffRoom = await query('SELECT id FROM hop_dong_thue WHERE khach_thue_id = ? AND dang_hoat_dong = 1 AND phong_id != ?', [tenant_id, room_id]);
+    if (existingDiffRoom.length > 0) {
+      return res.status(400).json({ error: 'Người thuê này đang thuê phòng khác rồi. Vui lòng trả phòng cũ trước.' });
+    }
 
     // Check not already in this room
     const sameRoom = await query('SELECT id FROM hop_dong_thue WHERE khach_thue_id = ? AND phong_id = ? AND dang_hoat_dong = 1', [tenant_id, room_id]);
@@ -848,6 +935,12 @@ app.put('/api/invoices/:id', async (req, res) => {
     const existing = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Invoice not found' });
 
+    if (existing.trang_thai === 'paid') {
+      return res.status(409).json({
+        error: 'Hóa đơn đã thanh toán và đã bị khóa. Không thể chỉnh sửa.',
+      });
+    }
+
     const updated = {
       phong_id: room_id !== undefined ? room_id : existing.phong_id,
       khach_thue_id: tenant_id !== undefined ? tenant_id : existing.khach_thue_id,
@@ -880,10 +973,21 @@ app.put('/api/invoices/:id', async (req, res) => {
 
 app.delete('/api/invoices/:id', async (req, res) => {
   try {
+    const existing = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [req.params.id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+
+    if (existing.trang_thai === 'paid') {
+      return res.status(409).json({
+        error: 'Hóa đơn đã thanh toán và đã bị khóa. Không thể xóa.',
+      });
+    }
+
     await run('DELETE FROM hoa_don WHERE id = ?', [req.params.id]);
-    res.status(204).end();
+    return res.status(204).end();
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -913,9 +1017,233 @@ app.put('/api/invoices/:id/paid', async (req, res) => {
     `, [today, req.params.id]);
 
     const updated = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [req.params.id]);
+    if (!updated) return res.status(404).json({ error: 'Invoice not found' });
+
+    const payment = await ensureInvoicePayment(updated);
+    if (payment) {
+      await run(`
+        UPDATE thanh_toan_hoa_don
+        SET so_tien_da_nhan = so_tien_yeu_cau, trang_thai = 'paid', ngay_cap_nhat = CURRENT_TIMESTAMP
+        WHERE hoa_don_id = ?
+      `, [req.params.id]);
+    }
+
     res.json(mapInvoice(updated));
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+
+// ----------------- QR PAYMENT & BANK TRANSACTIONS API -----------------
+app.get('/api/invoices/:id/payment', async (req, res) => {
+  try {
+    const invoice = await queryOne(`
+      SELECT i.*, r.so_phong, t.ho_ten
+      FROM hoa_don i
+      JOIN phong r ON i.phong_id = r.id
+      LEFT JOIN khach_thue t ON i.khach_thue_id = t.id
+      WHERE i.id = ?
+    `, [req.params.id]);
+
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    const bank = getBankConfig();
+    if (!bank.bankId || !bank.accountNumber || !bank.accountName) {
+      return res.status(503).json({
+        error: 'Chưa cấu hình tài khoản nhận tiền. Hãy thiết lập BANK_ID, BANK_ACCOUNT_NO và BANK_ACCOUNT_NAME trong file .env.',
+      });
+    }
+
+    const payment = await ensureInvoicePayment(invoice);
+    if (!payment) {
+      return res.status(500).json({ error: 'Không thể tạo mã thanh toán cho hóa đơn.' });
+    }
+
+    const transactions = await query(`
+      SELECT * FROM giao_dich_ngan_hang
+      WHERE hoa_don_id = ?
+      ORDER BY COALESCE(thoi_gian_giao_dich, ngay_tao) DESC
+      LIMIT 20
+    `, [invoice.id]);
+
+    const requiredAmount = Number(invoice.tong_tien) || 0;
+    const receivedAmount = Number(payment.so_tien_da_nhan) || 0;
+    const invoicePaid = invoice.trang_thai === 'paid';
+    const paymentStatus = invoicePaid ? 'paid' : payment.trang_thai;
+    const remainingAmount = invoicePaid ? 0 : Math.max(0, requiredAmount - receivedAmount);
+    // Khi hóa đơn đã thanh toán, backend không trả lại URL VietQR để mã cũ
+    // không thể tiếp tục được mở hoặc quét lại từ giao diện.
+    const qrAmount = remainingAmount > 0 ? remainingAmount : requiredAmount;
+    const qrLocked = invoicePaid;
+
+    res.json({
+      invoice_id: invoice.id,
+      room_number: invoice.so_phong,
+      tenant_name: invoice.ho_ten,
+      invoice_status: invoice.trang_thai,
+      payment_status: paymentStatus,
+      payment_code: payment.ma_thanh_toan,
+      required_amount: requiredAmount,
+      received_amount: receivedAmount,
+      remaining_amount: remainingAmount,
+      bank: {
+        bank_id: bank.bankId,
+        account_number: bank.accountNumber,
+        account_name: bank.accountName,
+      },
+      qr_locked: qrLocked,
+      qr_url: qrLocked ? null : buildVietQrUrl(bank, qrAmount, payment.ma_thanh_toan),
+      transactions: transactions.map(mapBankTransaction),
+    });
+  } catch (error) {
+    console.error('Payment QR error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/bank-transactions', async (req, res) => {
+  try {
+    const requestedLimit = Number.parseInt(String(req.query.limit || '20'), 10);
+    const limit = Math.min(100, Math.max(1, Number.isFinite(requestedLimit) ? requestedLimit : 20));
+    const data = await query(`
+      SELECT * FROM giao_dich_ngan_hang
+      ORDER BY COALESCE(thoi_gian_giao_dich, ngay_tao) DESC
+      LIMIT ?
+    `, [limit]);
+
+    res.json(data.map(mapBankTransaction));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/webhooks/sepay', async (req, res) => {
+  try {
+    const expectedApiKey = String(
+      process.env.SEPAY_WEBHOOK_API_KEY || (process.env.NODE_ENV === 'test' ? 'test-sepay-key' : '')
+    );
+
+    if (!expectedApiKey) {
+      return res.status(503).json({
+        success: false,
+        message: 'SEPAY_WEBHOOK_API_KEY chưa được cấu hình trên server.',
+      });
+    }
+
+    const authorization = String(req.get('authorization') || '');
+    const providedApiKey = authorization.startsWith('Apikey ') ? authorization.slice(7) : '';
+    if (!providedApiKey || !secureEqual(providedApiKey, expectedApiKey)) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const payload = req.body || {};
+    const transferType = String(payload.transferType || '').toLowerCase();
+    const amount = Number(payload.transferAmount);
+    const accountNumber = String(payload.accountNumber || '').trim();
+
+    if (!['in', 'out'].includes(transferType) || !Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid webhook payload' });
+    }
+
+    const configuredAccounts = String(
+      process.env.SEPAY_ALLOWED_ACCOUNT_NUMBERS || process.env.BANK_ACCOUNT_NO || ''
+    )
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (configuredAccounts.length > 0 && (!accountNumber || !configuredAccounts.includes(accountNumber))) {
+      return res.status(200).json({ success: true, ignored: true, reason: 'account_not_allowed' });
+    }
+
+    const rawProviderId = payload.id ?? payload.referenceCode ?? payload.referenceNumber;
+    const fallbackHash = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+    const providerTransactionId = `sepay:${String(rawProviderId || fallbackHash)}`;
+    const paymentCode = extractPaymentCode(payload);
+    const payment = paymentCode
+      ? await queryOne(`
+          SELECT p.*, h.trang_thai AS invoice_status
+          FROM thanh_toan_hoa_don p
+          JOIN hoa_don h ON h.id = p.hoa_don_id
+          WHERE p.ma_thanh_toan = ?
+        `, [paymentCode])
+      : null;
+
+    // Giao dịch dùng lại mã của hóa đơn đã thanh toán vẫn được lưu để đối soát,
+    // nhưng không được gắn hoặc cộng thêm vào hóa đơn đã khóa.
+    const activePayment = payment && payment.invoice_status !== 'paid' ? payment : null;
+
+    const insertResult = await run(`
+      INSERT OR IGNORE INTO giao_dich_ngan_hang (
+        id, nha_cung_cap, ma_giao_dich_ncc, ma_tham_chieu, ngan_hang, so_tai_khoan,
+        loai_giao_dich, so_tien, so_du_sau_giao_dich, noi_dung, ma_thanh_toan,
+        hoa_don_id, thoi_gian_giao_dich, du_lieu_goc
+      ) VALUES (?, 'sepay', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      generateId(),
+      providerTransactionId,
+      payload.referenceCode || payload.referenceNumber || null,
+      payload.gateway || null,
+      accountNumber || null,
+      transferType,
+      amount,
+      Number.isFinite(Number(payload.accumulated)) ? Number(payload.accumulated) : null,
+      payload.content || payload.description || null,
+      paymentCode,
+      activePayment?.hoa_don_id || null,
+      payload.transactionDate || null,
+      JSON.stringify(payload),
+    ]);
+
+    if (insertResult.changes === 0) {
+      return res.status(200).json({ success: true, duplicate: true });
+    }
+
+    let invoicePaid = false;
+    let receivedAmount = 0;
+
+    if (activePayment && transferType === 'in') {
+      const aggregate = await queryOne(`
+        SELECT COALESCE(SUM(so_tien), 0) AS total_received
+        FROM giao_dich_ngan_hang
+        WHERE hoa_don_id = ? AND loai_giao_dich = 'in'
+      `, [activePayment.hoa_don_id]);
+
+      receivedAmount = Number(aggregate?.total_received) || 0;
+      const requiredAmount = Number(activePayment.so_tien_yeu_cau) || 0;
+      const paymentStatus = receivedAmount >= requiredAmount && requiredAmount > 0
+        ? 'paid'
+        : receivedAmount > 0
+          ? 'partial'
+          : 'pending';
+
+      await run(`
+        UPDATE thanh_toan_hoa_don
+        SET so_tien_da_nhan = ?, trang_thai = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+        WHERE hoa_don_id = ?
+      `, [receivedAmount, paymentStatus, activePayment.hoa_don_id]);
+
+      if (paymentStatus === 'paid') {
+        const paidDate = String(payload.transactionDate || new Date().toISOString()).slice(0, 10);
+        await run(`
+          UPDATE hoa_don
+          SET trang_thai = 'paid', ngay_thanh_toan = COALESCE(ngay_thanh_toan, ?), ngay_cap_nhat = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, [paidDate, activePayment.hoa_don_id]);
+        invoicePaid = true;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      matched_invoice: activePayment?.hoa_don_id || null,
+      received_amount: receivedAmount,
+      invoice_paid: invoicePaid,
+    });
+  } catch (error) {
+    console.error('SePay webhook error:', error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 

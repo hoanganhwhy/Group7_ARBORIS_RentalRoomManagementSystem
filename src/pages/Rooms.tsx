@@ -13,10 +13,7 @@ import {
   PiInfoLight,
   PiMagnifyingGlassLight,
   PiWarningCircleLight,
-  PiArrowsClockwiseLight,
-  PiGridFourLight,
-  PiListLight,
-  PiCheckSquareOffsetLight
+  PiArrowsClockwiseLight
 } from 'react-icons/pi';
 import { Modal } from '../components/ui/Modal';
 import { Button } from '../components/ui/Button';
@@ -50,19 +47,6 @@ export function Rooms() {
   const [viewingRoom, setViewingRoom] = useState<Room | null>(null);
   const [extendingAssignment, setExtendingAssignment] = useState<RoomAssignment | null>(null);
   const [filter, setFilter] = useState<'all' | 'available' | 'occupied' | 'maintenance'>('all');
-
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('roomsViewMode') as 'grid' | 'list') || 'grid');
-
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [selectedRooms, setSelectedRooms] = useState<Set<string>>(new Set());
-  const [isBulkStatusModalOpen, setIsBulkStatusModalOpen] = useState(false);
-  const [isBulkPriceModalOpen, setIsBulkPriceModalOpen] = useState(false);
-  const [bulkStatus, setBulkStatus] = useState<'available' | 'maintenance'>('available');
-  const [bulkPrice, setBulkPrice] = useState<string | number>('');
-
-  useEffect(() => {
-    localStorage.setItem('roomsViewMode', viewMode);
-  }, [viewMode]);
   const [searchQuery, setSearchQuery] = useState('');
   const [expiringContracts, setExpiringContracts] = useState<RoomAssignment[]>([]);
   const [extendData, setExtendData] = useState({
@@ -281,56 +265,6 @@ export function Rooms() {
     const matchesSearch = !searchQuery || r.room_number.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesStatus && matchesSearch;
   });
-
-  const toggleRoomSelection = (roomId: string) => {
-    const newSelected = new Set(selectedRooms);
-    if (newSelected.has(roomId)) {
-      newSelected.delete(roomId);
-    } else {
-      newSelected.add(roomId);
-    }
-    setSelectedRooms(newSelected);
-  };
-
-  const toggleAllSelection = () => {
-    if (selectedRooms.size === filteredRooms.length) {
-      setSelectedRooms(new Set());
-    } else {
-      setSelectedRooms(new Set(filteredRooms.map(r => r.id)));
-    }
-  };
-
-  const handleBulkUpdateStatus = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await Promise.all(Array.from(selectedRooms).map(id => updateRoom(id, { status: bulkStatus })));
-      setIsBulkStatusModalOpen(false);
-      setSelectedRooms(new Set());
-      loadData();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleBulkUpdatePrice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!bulkPrice) return;
-    setSaving(true);
-    try {
-      await Promise.all(Array.from(selectedRooms).map(id => updateRoom(id, { monthly_rent: Number(bulkPrice) })));
-      setIsBulkPriceModalOpen(false);
-      setSelectedRooms(new Set());
-      loadData();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const statusCounts = {
     all: rooms.length,
     available: rooms.filter((r) => r.status === 'available').length,
@@ -349,7 +283,7 @@ export function Rooms() {
       {/* Page Header */}
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Phòng trọ</h1>
+          <h1 className="text-3xl font-serif text-charcoal-900 tracking-wide">Phòng trọ</h1>
           <p className="text-charcoal-400 mt-2 text-sm">Quản lý và theo dõi tất cả các phòng trọ</p>
         </div>
         <Button onClick={openCreateModal}>
@@ -380,36 +314,7 @@ export function Rooms() {
               }`}>{statusCounts[status]}</span>
             </button>
           ))}
-          
-          <div className="flex bg-charcoal-100/50 rounded-xl p-1 mr-4">
-            <button
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-white shadow-sm text-charcoal-900' : 'text-charcoal-400 hover:text-charcoal-600'}`}
-              title="Chế độ Lưới"
-            >
-              <PiGridFourLight className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={`p-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-white shadow-sm text-charcoal-900' : 'text-charcoal-400 hover:text-charcoal-600'}`}
-              title="Chế độ Danh sách"
-            >
-              <PiListLight className="w-5 h-5" />
-            </button>
-          </div>
-          <button
-            onClick={() => {
-              setIsSelectionMode(!isSelectionMode);
-              if (isSelectionMode) setSelectedRooms(new Set()); // Clear selection when exiting mode
-            }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium transition-colors mr-4 ${
-              isSelectionMode ? 'bg-wood-100 text-wood-700 shadow-sm' : 'text-charcoal-500 hover:text-charcoal-700 bg-charcoal-50 hover:bg-charcoal-100/50'
-            }`}
-          >
-            <PiCheckSquareOffsetLight className="w-4 h-4" />
-            {isSelectionMode ? 'Hủy chọn' : 'Chọn'}
-          </button>
-<div className="relative ml-auto">
+          <div className="relative ml-auto">
             <PiMagnifyingGlassLight className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400" />
             <input
               type="text"
@@ -461,40 +366,7 @@ export function Rooms() {
         </div>
       )}
 
-      {/* Bulk Action Bar */}
-      {selectedRooms.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-charcoal-900 text-white px-6 py-4 rounded-full shadow-2xl flex items-center gap-6 z-50 animate-fade-in border border-charcoal-700">
-          <div className="flex items-center gap-3 pr-6 border-r border-charcoal-700">
-            <div className="w-8 h-8 rounded-full bg-charcoal-800 flex items-center justify-center text-sm font-bold">
-              {selectedRooms.size}
-            </div>
-            <span className="text-sm font-medium">phòng đã chọn</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setIsBulkStatusModalOpen(true)}
-              className="px-4 py-2 text-sm font-medium bg-charcoal-800 hover:bg-charcoal-700 rounded-full transition-colors flex items-center gap-2"
-            >
-              Cập nhật trạng thái
-            </button>
-            <button 
-              onClick={() => setIsBulkPriceModalOpen(true)}
-              className="px-4 py-2 text-sm font-medium bg-charcoal-800 hover:bg-charcoal-700 rounded-full transition-colors flex items-center gap-2"
-            >
-              Cập nhật giá
-            </button>
-            <button 
-              onClick={() => setSelectedRooms(new Set())}
-              className="p-2 text-charcoal-400 hover:text-white rounded-full transition-colors ml-2"
-              title="Bỏ chọn"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Room Grid / List */}
+      {/* Room Grid */}
       {filteredRooms.length === 0 ? (
         <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card p-12">
           <EmptyState
@@ -504,15 +376,12 @@ export function Rooms() {
             action={<Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4 mr-1" />Thêm phòng</Button>}
           />
         </div>
-      ) : viewMode === 'grid' ? (
+      ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-5">
           {filteredRooms.map((room) => (
             <PropertyCard
               key={room.id}
               room={room}
-              isSelectionMode={isSelectionMode}
-              selected={selectedRooms.has(room.id)}
-              onToggleSelect={() => toggleRoomSelection(room.id)}
               onView={() => openDetailModal(room)}
               onEdit={() => openEditModal(room)}
               onDelete={() => openDeleteModal(room)}
@@ -522,139 +391,7 @@ export function Rooms() {
             />
           ))}
         </div>
-      ) : (
-        <div className="bg-white rounded-[2rem] border border-cream-200 shadow-soft overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-cream-50/50 border-b border-cream-200 text-[11px] uppercase tracking-widest text-charcoal-400 font-semibold">
-                <th className="p-4 pl-6 w-12">
-                  <input 
-                    type="checkbox" 
-                    checked={selectedRooms.size === filteredRooms.length && filteredRooms.length > 0}
-                    onChange={toggleAllSelection}
-                    className="w-4 h-4 rounded border-cream-300 text-wood-500 focus:ring-wood-400 cursor-pointer"
-                  />
-                </th>
-                <th className="p-4">Phòng</th>
-                <th className="p-4">Trạng thái</th>
-                <th className="p-4">Giá thuê</th>
-                <th className="p-4">Sức chứa</th>
-                <th className="p-4">Người thuê chính</th>
-                <th className="p-4 pr-6 text-right">Hành động</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-cream-100">
-              {filteredRooms.map(room => {
-                const currentOccupants = room.active_assignments?.length || 0;
-                const maxOccupants = room.max_occupants || 2;
-                const primaryAssignment = room.active_assignments?.find(a => a.is_primary);
-                
-                return (
-                  <tr key={room.id} className="hover:bg-cream-50/50 transition-colors group">
-                    <td className="p-4 pl-6">
-                      <input 
-                        type="checkbox" 
-                        checked={selectedRooms.has(room.id)}
-                        onChange={() => toggleRoomSelection(room.id)}
-                        className="w-4 h-4 rounded border-cream-300 text-wood-500 focus:ring-wood-400 cursor-pointer"
-                      />
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-charcoal-50 flex items-center justify-center shrink-0 border border-charcoal-100">
-                          <PiDoorOpenLight className="w-5 h-5 text-charcoal-400" />
-                        </div>
-                        <div>
-                          <p className="font-serif lining-nums tabular-nums font-medium text-charcoal-900 cursor-pointer hover:text-wood-600 transition-colors" onClick={() => openDetailModal(room)}>Phòng {room.room_number}</p>
-                          <p className="text-xs text-charcoal-400">Tầng {room.floor} • {room.area_sqm}m²</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <Badge 
-                        status={room.status} 
-                        variant={room.status === 'available' ? 'success' : room.status === 'occupied' ? 'info' : 'default'} 
-                        size="sm" 
-                      />
-                    </td>
-                    <td className="p-4 font-serif lining-nums tabular-nums text-wood-600">
-                      {room.monthly_rent.toLocaleString('vi-VN')}đ
-                    </td>
-                    <td className="p-4">
-                      <p className={`text-sm font-medium ${currentOccupants >= maxOccupants ? 'text-amber-600' : 'text-charcoal-600'}`}>
-                        {currentOccupants}/{maxOccupants} người
-                      </p>
-                    </td>
-                    <td className="p-4">
-                      {primaryAssignment ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-amber-50 flex items-center justify-center">
-                            <PiCrownLight className="w-3.5 h-3.5 text-amber-600" />
-                          </div>
-                          <span className="text-sm text-charcoal-800 font-medium">{primaryAssignment.tenant?.full_name}</span>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-charcoal-300 italic">Trống</span>
-                      )}
-                    </td>
-                    <td className="p-4 pr-6 text-right">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => openEditModal(room)} className="p-2 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors" title="Sửa">
-                          <PiPencilSimpleLight className="w-4 h-4" />
-                        </button>
-                        <button 
-                          onClick={() => openDeleteModal(room)} 
-                          disabled={currentOccupants > 0}
-                          className={`p-2 rounded-lg transition-colors ${currentOccupants > 0 ? 'text-cream-200 cursor-not-allowed' : 'text-charcoal-400 hover:text-rose-500 hover:bg-rose-50'}`}
-                          title="Xóa"
-                        >
-                          <PiTrashLight className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
       )}
-
-      {/* Bulk Status Modal */}
-      <Modal isOpen={isBulkStatusModalOpen} onClose={() => setIsBulkStatusModalOpen(false)} title="Cập nhật trạng thái hàng loạt" size="sm">
-        <form onSubmit={handleBulkUpdateStatus} className="p-5 space-y-4">
-          <div className="p-3 bg-amber-50 rounded-xl mb-4">
-            <p className="text-sm text-amber-800">
-              Bạn đang cập nhật <strong>{selectedRooms.size}</strong> phòng. Lưu ý: Các phòng đang có người ở sẽ không bị ảnh hưởng nếu bạn chuyển sang Trống/Bảo trì.
-            </p>
-          </div>
-          <Input label="Trạng thái mới" name="status" type="select" value={bulkStatus} onChange={(v) => setBulkStatus(v as any)} required
-            options={[
-              { value: 'available', label: 'Trống' },
-              { value: 'maintenance', label: 'Bảo trì' },
-            ]} />
-          <div className="flex gap-3 pt-4 border-t border-charcoal-100">
-            <Button type="button" variant="secondary" onClick={() => setIsBulkStatusModalOpen(false)}>Hủy</Button>
-            <Button type="submit" disabled={saving}>{saving ? 'Đang xử lý...' : 'Xác nhận'}</Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Bulk Price Modal */}
-      <Modal isOpen={isBulkPriceModalOpen} onClose={() => setIsBulkPriceModalOpen(false)} title="Cập nhật giá hàng loạt" size="sm">
-        <form onSubmit={handleBulkUpdatePrice} className="p-5 space-y-4">
-          <div className="p-3 bg-amber-50 rounded-xl mb-4">
-            <p className="text-sm text-amber-800">
-              Bạn đang cập nhật giá thuê cho <strong>{selectedRooms.size}</strong> phòng.
-            </p>
-          </div>
-          <Input label="Giá thuê mới (VNĐ)" name="monthly_rent" type="number" value={bulkPrice} onChange={(v) => setBulkPrice(v)} required min={0} />
-          <div className="flex gap-3 pt-4 border-t border-charcoal-100">
-            <Button type="button" variant="secondary" onClick={() => setIsBulkPriceModalOpen(false)}>Hủy</Button>
-            <Button type="submit" disabled={saving}>{saving ? 'Đang xử lý...' : 'Xác nhận'}</Button>
-          </div>
-        </form>
-      </Modal>
 
       {/* Room Detail Modal */}
       <Modal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} title={`Chi tiết phòng ${viewingRoom?.room_number}`} size="lg">
@@ -927,9 +664,6 @@ const roomImages = [
 ];
 
 function PropertyCard({
-  isSelectionMode,
-  selected,
-  onToggleSelect,
   room,
   onView,
   onEdit,
@@ -938,9 +672,6 @@ function PropertyCard({
   onCheckout,
   onSetPrimary,
 }: {
-  isSelectionMode: boolean;
-  selected: boolean;
-  onToggleSelect: () => void;
   room: Room;
   onView: () => void;
   onEdit: () => void;
@@ -968,24 +699,12 @@ function PropertyCard({
   const imageUrl = roomImages[imageIndex];
 
   return (
-    <div className={`group bg-white rounded-2xl transition-all duration-500 overflow-hidden flex flex-col h-full border ${selected ? 'border-wood-500 shadow-[0_8px_30px_rgb(139,94,60,0.15)] scale-[1.02] ring-1 ring-wood-500' : 'border-cream-200 shadow-soft hover:shadow-card-hover'}`}>
+    <div className="group bg-white rounded-2xl shadow-soft hover:shadow-card-hover transition-all duration-300 overflow-hidden flex flex-col h-full border border-cream-200">
       {/* Header Image Area — clickable to view detail */}
       <div
-        onClick={isSelectionMode ? onToggleSelect : onView}
+        onClick={onView}
         className="relative h-48 w-full cursor-pointer overflow-hidden"
       >
-        {/* Selection Indicator Overlay */}
-        {selected && (
-          <div className="absolute inset-0 bg-wood-900/20 backdrop-blur-[1px] z-20 pointer-events-none transition-all duration-500"></div>
-        )}
-        {selected && (
-          <div className="absolute top-3 right-3 w-8 h-8 bg-white/95 backdrop-blur-md border border-white/50 rounded-full flex items-center justify-center z-30 shadow-xl animate-fade-in">
-            <svg className="w-4 h-4 text-wood-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-        )}
-
         <img 
           src={imageUrl} 
           alt={`Phòng ${room.room_number}`} 
@@ -1005,7 +724,7 @@ function PropertyCard({
 
         {/* Bottom Info inside Image */}
         <div className="absolute bottom-3 left-3 right-3">
-          <h3 className="font-serif lining-nums tabular-nums text-2xl text-white tracking-wide mb-0.5">
+          <h3 className="font-serif text-2xl text-white tracking-wide mb-0.5">
             Phòng {room.room_number}
           </h3>
           <p className="text-white/80 text-[11px] font-medium tracking-wider uppercase">Tầng {room.floor}</p>
@@ -1018,7 +737,7 @@ function PropertyCard({
         <div className="flex justify-between items-end pb-3 border-b border-cream-200">
           <div>
             <p className="text-[10px] text-charcoal-400 uppercase tracking-widest font-semibold mb-0.5">Giá Thuê</p>
-            <p className="font-serif lining-nums tabular-nums text-lg text-wood-600">{room.monthly_rent.toLocaleString('vi-VN')}đ</p>
+            <p className="font-serif text-lg text-wood-600">{room.monthly_rent.toLocaleString('vi-VN')}đ</p>
           </div>
           <div className="text-right">
             <p className="text-[10px] text-charcoal-400 uppercase tracking-widest font-semibold mb-0.5">Diện Tích</p>

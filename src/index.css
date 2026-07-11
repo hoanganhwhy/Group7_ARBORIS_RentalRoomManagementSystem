@@ -47,13 +47,3 @@ body {
     @apply outline-none ring-2 ring-wood-300 ring-offset-2 ring-offset-cream-50;
   }
 }
-
-@layer utilities {
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-}

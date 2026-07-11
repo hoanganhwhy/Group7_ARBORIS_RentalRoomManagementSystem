@@ -112,3 +112,9 @@ Chi tiết xem tại tài liệu **[SDLC.md](file:///e:/Quan%20Li%20Phong%20Tro/
 1. **Git Workflow**: Chỉ merge code qua Pull Request vào các nhánh `develop` và `main` sau khi CI báo xanh.
 2. **Commit Convention**: Commit bắt buộc theo chuẩn Angular (ví dụ: `feat(rooms): ...`, `fix(invoices): ...`).
 3. **Definition of Done**: Một tính năng chỉ hoàn thành khi code sạch linter, test pass, coverage >= 70%, và chạy CI thành công.
+
+## Thanh toán QR và biến động số dư
+
+Dự án đã được bổ sung luồng VietQR + SePay: tạo QR theo từng hóa đơn, nhận webhook giao dịch, chống ghi trùng, hỗ trợ thanh toán một phần và tự đánh dấu hóa đơn đã thanh toán.
+
+Xem hướng dẫn đầy đủ tại [`HUONG_DAN_THANH_TOAN_QR_SEPAY.md`](./HUONG_DAN_THANH_TOAN_QR_SEPAY.md).

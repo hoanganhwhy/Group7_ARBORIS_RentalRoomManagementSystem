@@ -9,14 +9,12 @@ import {
   updateRepairRequest,
   deleteRepairRequest,
   getRooms,
-  getTenants,
 } from '../lib/api';
-import type { RepairRequest, Room, Tenant } from '../types';
+import type { RepairRequest, Room } from '../types';
 
 export function Repairs() {
   const [repairs, setRepairs] = useState<RepairRequest[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -43,12 +41,11 @@ export function Repairs() {
 
   async function loadData() {
     try {
-      const [repairsData, roomsData, tenantsData] = await Promise.all([
-        getRepairRequests(), getRooms(), getTenants(),
+      const [repairsData, roomsData] = await Promise.all([
+        getRepairRequests(), getRooms(),
       ]);
       setRepairs(repairsData);
       setRooms(roomsData);
-      setTenants(tenantsData);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -172,7 +169,7 @@ export function Repairs() {
       {/* Page Header */}
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Sửa chữa</h1>
+          <h1 className="text-3xl font-serif text-charcoal-900 tracking-wide">Sửa chữa</h1>
           <p className="text-charcoal-400 mt-2 text-sm">Quản lý và theo dõi các yêu cầu bảo trì</p>
         </div>
         <Button onClick={openCreateModal}>
@@ -213,75 +210,17 @@ export function Repairs() {
           action={filter === 'all' ? <Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4" />Tạo yêu cầu</Button> : undefined}
         />
       ) : (
-        <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-cream-50/50 border-b border-cream-200 text-xs uppercase tracking-widest text-charcoal-500 font-semibold">
-                <th className="px-4 py-3">Phòng</th>
-                <th className="px-4 py-3">Yêu cầu</th>
-                <th className="px-4 py-3 text-center">Mức độ</th>
-                <th className="px-4 py-3 text-center">Trạng thái</th>
-                <th className="px-4 py-3">Ngày báo</th>
-                <th className="px-4 py-3 text-right">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-cream-100">
-              {filteredRepairs.map((repair) => {
-                const priorityColors: Record<string, { bg: string; text: string; label: string }> = {
-                  low: { bg: 'bg-charcoal-50', text: 'text-charcoal-500', label: 'Thấp' },
-                  medium: { bg: 'bg-blue-50', text: 'text-blue-600', label: 'Trung bình' },
-                  high: { bg: 'bg-amber-50', text: 'text-amber-600', label: 'Cao' },
-                  urgent: { bg: 'bg-rose-50', text: 'text-rose-600', label: 'Khẩn cấp' },
-                };
-                const priority = priorityColors[repair.priority] || priorityColors.medium;
-                return (
-                  <tr key={repair.id} onClick={() => openDetailModal(repair)} className="hover:bg-cream-50/50 transition-colors group cursor-pointer">
-                    <td className="px-4 py-3 align-middle">
-                      <p className="font-serif font-medium text-wood-700 text-[15px]">P.{repair.room?.room_number}</p>
-                      <p className="text-xs text-charcoal-400 mt-0.5">{repair.tenant?.full_name || '—'}</p>
-                    </td>
-                    <td className="px-4 py-3 align-middle">
-                      <p className="font-serif font-semibold text-charcoal-900 tracking-wide line-clamp-1">{repair.title}</p>
-                      {repair.description && <p className="text-xs text-charcoal-400 mt-0.5 line-clamp-1">{repair.description}</p>}
-                    </td>
-                    <td className="px-4 py-3 align-middle text-center">
-                      <span className={`inline-flex items-center justify-center px-2 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider ${priority.bg} ${priority.text}`}>
-                        {priority.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 align-middle text-center">
-                      <StatusBadge status={repair.status} />
-                    </td>
-                    <td className="px-4 py-3 align-middle">
-                      <span className="font-serif lining-nums tabular-nums font-medium text-charcoal-600">
-                        {new Date(repair.reported_at).toLocaleDateString('vi-VN')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 align-middle text-right">
-                      <div className="flex justify-end items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                        {repair.status === 'new' && (
-                          <button onClick={() => handleStatusChange(repair, 'in_progress')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-wood-600 bg-wood-50 hover:bg-wood-100 rounded-lg border border-wood-200 transition-colors">
-                            <PiClockLight className="w-3.5 h-3.5" /> Bắt đầu
-                          </button>
-                        )}
-                        {repair.status === 'in_progress' && (
-                          <button onClick={() => handleStatusChange(repair, 'resolved')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
-                            <PiCheckCircleLight className="w-3.5 h-3.5" /> Xong
-                          </button>
-                        )}
-                        <button onClick={(e) => openEditModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Sửa">
-                          <PiPencilSimpleLight className="w-4 h-4" />
-                        </button>
-                        <button onClick={(e) => openDeleteModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200" title="Xóa">
-                          <PiTrashLight className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {filteredRepairs.map((repair) => (
+            <RepairCard
+              key={repair.id}
+              repair={repair}
+              onView={() => openDetailModal(repair)}
+              onEdit={(e) => openEditModal(repair, e)}
+              onDelete={(e) => openDeleteModal(repair, e)}
+              onStatusChange={handleStatusChange}
+            />
+          ))}
         </div>
       )}
 
@@ -327,7 +266,7 @@ export function Repairs() {
               options={[{ value: 'new', label: 'Mới tạo' }, { value: 'in_progress', label: 'Đang xử lý' }, { value: 'resolved', label: 'Đã xong xong' }, { value: 'closed', label: 'Đã đóng' }]}
             />
           </div>
-          <Input label="Người phụ trách" name="assigned_to" value={formData.assigned_to} onChange={(v) => setFormData({ ...formData, assigned_to: v })} placeholder="VD: Nguyễn Văn A" />
+          <Input label="Người phụ trìch" name="assigned_to" value={formData.assigned_to} onChange={(v) => setFormData({ ...formData, assigned_to: v })} placeholder="VD: Nguyễn Văn A" />
           {(formData.status === 'resolved' || formData.status === 'closed') && (
             <Input label="Ghi chú xử lý" name="resolution_notes" type="textarea" value={formData.resolution_notes} onChange={(v) => setFormData({ ...formData, resolution_notes: v })} placeholder="Mô tả cách xử lý..." rows={2} />
           )}
@@ -344,7 +283,7 @@ export function Repairs() {
           <div className="p-6 space-y-5">
             <div className="flex items-center gap-3 flex-wrap">
               <PriorityIcon priority={viewingRepair.priority} />
-              <h3 className="text-2xl font-serif font-bold text-charcoal-900 flex-1 tracking-wide">{viewingRepair.title}</h3>
+              <h3 className="text-xl font-bold text-slate-900 flex-1">{viewingRepair.title}</h3>
               <StatusBadge status={viewingRepair.status} />
             </div>
 
@@ -390,7 +329,7 @@ export function Repairs() {
                     <PiUserLight className="w-4 h-4 text-charcoal-500" />
                   </div>
                   <div>
-                    <p className="text-xs text-charcoal-400">Người phụ trách</p>
+                    <p className="text-xs text-charcoal-400">Người phụ trìch</p>
                     <p className="font-medium text-charcoal-900">{viewingRepair.assigned_to}</p>
                   </div>
                 </div>
@@ -443,6 +382,104 @@ export function Repairs() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function RepairCard({
+  repair,
+  onView,
+  onEdit,
+  onDelete,
+  onStatusChange,
+}: {
+  repair: RepairRequest;
+  onView: () => void;
+  onEdit: (e: React.MouseEvent) => void;
+  onDelete: (e: React.MouseEvent) => void;
+  onStatusChange: (r: RepairRequest, s: 'in_progress' | 'resolved' | 'closed') => void;
+}) {
+  const priorityColors: Record<string, { bg: string; text: string; dot: string }> = {
+    low: { bg: 'bg-charcoal-50', text: 'text-charcoal-500', dot: 'bg-charcoal-300' },
+    medium: { bg: 'bg-blue-50', text: 'text-blue-600', dot: 'bg-blue-400' },
+    high: { bg: 'bg-amber-50', text: 'text-amber-600', dot: 'bg-amber-400' },
+    urgent: { bg: 'bg-rose-50', text: 'text-rose-600', dot: 'bg-rose-400' },
+  };
+
+  const priority = priorityColors[repair.priority] || priorityColors.medium;
+
+  return (
+    <div
+      onClick={onView}
+      className="bg-white rounded-2xl border border-charcoal-100 shadow-card hover:shadow-card-hover transition-all duration-300 cursor-pointer overflow-hidden group"
+    >
+      <div className="px-7 py-6">
+        <div className="flex items-start gap-5">
+          {/* Priority indicator */}
+          <div className={`w-1 h-16 rounded-full ${priority.dot} shrink-0`} />
+
+          <div className="flex-1 min-w-0">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h3 className="text-lg font-semibold text-charcoal-900">{repair.title}</h3>
+                  <StatusBadge status={repair.status} />
+                </div>
+                {repair.description && (
+                  <p className="text-charcoal-400 text-sm line-clamp-2 leading-relaxed">{repair.description}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Meta info */}
+            <div className="flex items-center gap-6 text-sm text-charcoal-400">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-charcoal-50 flex items-center justify-center">
+                  <PiWrenchLight className="w-3.5 h-3.5" />
+                </div>
+                <span>Phòng {repair.room?.room_number}</span>
+              </div>
+              {repair.tenant && (
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-charcoal-50 flex items-center justify-center">
+                    <PiUserLight className="w-3.5 h-3.5" />
+                  </div>
+                  <span>{repair.tenant.full_name}</span>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-charcoal-50 flex items-center justify-center">
+                  <PiCalendarBlankLight className="w-3.5 h-3.5" />
+                </div>
+                <span>{new Date(repair.reported_at).toLocaleDateString('vi-VN')}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+            {repair.status === 'new' && (
+              <button onClick={(e) => { e.stopPropagation(); onStatusChange(repair, 'in_progress'); }}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-wood-600 bg-wood-50 hover:bg-wood-100 rounded-xl transition-colors">
+                <PiClockLight className="w-4 h-4" />Bắt đầu
+              </button>
+            )}
+            {repair.status === 'in_progress' && (
+              <button onClick={(e) => { e.stopPropagation(); onStatusChange(repair, 'resolved'); }}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-xl transition-colors">
+                <PiCheckCircleLight className="w-4 h-4" />Hoàn thành
+              </button>
+            )}
+            <button onClick={onEdit} className="p-2.5 rounded-xl text-charcoal-400 hover:text-charcoal-600 hover:bg-charcoal-50 transition-colors">
+              <PiPencilSimpleLight className="w-4 h-4" />
+            </button>
+            <button onClick={onDelete} className="p-2.5 rounded-xl text-charcoal-400 hover:text-rose-500 hover:bg-rose-50 transition-colors">
+              <PiTrashLight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

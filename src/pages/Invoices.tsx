@@ -7,9 +7,12 @@ import {
   PiCheckCircleLight,
   PiClockLight,
   PiWarningCircleLight,
+  PiQrCodeLight,
+  PiArrowsClockwiseLight,
+  PiBankLight,
+  PiCopyLight,
 } from 'react-icons/pi';
 import { Modal } from '../components/ui/Modal';
-import { FilterDropdown } from '../components/ui/FilterDropdown';
 import { Button } from '../components/ui/Button';
 import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
 import {
@@ -17,12 +20,13 @@ import {
   createInvoice,
   updateInvoice,
   deleteInvoice,
-  markInvoicePaid,
   markOverdueInvoices,
   getRooms,
   getMeterReadings,
+  getInvoicePayment,
+  getBankTransactions,
 } from '../lib/api';
-import type { Invoice, Room, MeterReading } from '../types';
+import type { Invoice, Room, MeterReading, InvoicePaymentInfo, BankTransaction } from '../types';
 
 export function Invoices() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -33,6 +37,12 @@ export function Invoices() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
+  const [paymentInfo, setPaymentInfo] = useState<InvoicePaymentInfo | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+  const [paymentSuccessMessage, setPaymentSuccessMessage] = useState('');
+  const [bankTransactions, setBankTransactions] = useState<BankTransaction[]>([]);
   const [filter, setFilter] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
   const [filterYear, setFilterYear] = useState<number>(new Date().getFullYear());
@@ -68,26 +78,90 @@ export function Invoices() {
       }
     };
 
+    const handleBankTransaction = (event: Event) => {
+      const transaction = (event as CustomEvent<BankTransaction>).detail;
+      if (!transaction) return;
+
+      setBankTransactions((current) => [
+        transaction,
+        ...current.filter((item) => item.id !== transaction.id),
+      ].slice(0, 10));
+
+      // Tiền vào có thể làm thay đổi trạng thái hóa đơn, vì vậy tải lại dữ liệu
+      // để bảng hóa đơn cập nhật ngay cả khi người dùng không mở cửa sổ QR.
+      if (transaction.transfer_type === 'in') {
+        loadData();
+      }
+    };
+
     window.addEventListener('open-modal', handleOpenModal);
     window.addEventListener('apply-filter', handleApplyFilter);
+    window.addEventListener('bank-transaction-received', handleBankTransaction);
     return () => {
       window.removeEventListener('open-modal', handleOpenModal);
       window.removeEventListener('apply-filter', handleApplyFilter);
+      window.removeEventListener('bank-transaction-received', handleBankTransaction);
     };
   }, []);
+
+  useEffect(() => {
+    if (!paymentInvoice) return;
+
+    let cancelled = false;
+    const intervalId = window.setInterval(() => refresh(false), 3000);
+
+    const refresh = async (showLoading: boolean) => {
+      if (showLoading) setPaymentLoading(true);
+      try {
+        const info = await getInvoicePayment(paymentInvoice.id);
+        if (cancelled) return;
+        setPaymentInfo(info);
+        setPaymentError('');
+
+        if (info.invoice_status === 'paid') {
+          if (intervalId) window.clearInterval(intervalId);
+          await loadData();
+
+          // Giữ cửa sổ thanh toán mở để người dùng nhìn thấy QR đã bị khóa
+          // và có thể xem lại lịch sử giao dịch của hóa đơn.
+          if (paymentInvoice.status !== 'paid') {
+            const roomNumber = paymentInvoice.room?.room_number;
+            setPaymentSuccessMessage(
+              `Đã nhận đủ tiền${roomNumber ? ` cho phòng ${roomNumber}` : ''}. Hóa đơn đã được cập nhật tự động.`
+            );
+            window.setTimeout(() => setPaymentSuccessMessage(''), 5000);
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setPaymentError(error instanceof Error ? error.message : 'Không thể tải thông tin thanh toán.');
+      } finally {
+        if (!cancelled && showLoading) setPaymentLoading(false);
+      }
+    };
+
+    refresh(true);
+
+    return () => {
+      cancelled = true;
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [paymentInvoice?.id]);
 
   async function loadData() {
     try {
       // Mark any pending invoices past their due date as overdue before fetching
       await markOverdueInvoices().catch(() => {});
-      const [invoicesData, roomsData, readingsData] = await Promise.all([
+      const [invoicesData, roomsData, readingsData, transactionsData] = await Promise.all([
         getInvoices(),
         getRooms(),
         getMeterReadings(),
+        getBankTransactions(10),
       ]);
       setInvoices(invoicesData);
       setRooms(roomsData);
       setReadings(readingsData);
+      setBankTransactions(transactionsData);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -123,7 +197,7 @@ export function Invoices() {
       electricity_cost: invoice.electricity_cost,
       water_cost: invoice.water_cost,
       other_fees: invoice.other_fees ?? '',
-      due_date: invoice.due_date,
+      due_date: invoice.due_date || '',
       notes: invoice.notes || '',
     });
     setIsModalOpen(true);
@@ -132,6 +206,26 @@ export function Invoices() {
   function openDeleteModal(invoice: Invoice) {
     setDeletingInvoice(invoice);
     setIsDeleteModalOpen(true);
+  }
+
+  function openPaymentModal(invoice: Invoice) {
+    setPaymentInfo(null);
+    setPaymentError('');
+    setPaymentInvoice(invoice);
+  }
+
+  function closePaymentModal() {
+    setPaymentInvoice(null);
+    setPaymentInfo(null);
+    setPaymentError('');
+  }
+
+  async function copyText(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      alert(`Hãy sao chép thủ công: ${value}`);
+    }
   }
 
   function handleRoomChange(roomId: string) {
@@ -216,16 +310,6 @@ export function Invoices() {
     }
   }
 
-  async function handleMarkPaid(invoice: Invoice) {
-    try {
-      await markInvoicePaid(invoice.id);
-      await loadData();
-    } catch (error) {
-      console.error('Failed to mark invoice as paid:', error);
-      alert('Không thể cập nhật trạng thái.');
-    }
-  }
-
   const filteredInvoices = invoices.filter((invoice) => {
     const matchesStatus = filter === 'all' || invoice.status === filter;
     const matchesYear = invoice.invoice_year === filterYear;
@@ -248,14 +332,26 @@ export function Invoices() {
     .filter((i) => i.status === 'paid')
     .reduce((sum, i) => sum + Number(i.total_amount), 0);
 
+  const latestBalance = bankTransactions.find((transaction) => transaction.accumulated !== null)?.accumulated ?? null;
+
   if (loading) return <Spinner />;
 
   return (
     <div className="space-y-10">
+      {paymentSuccessMessage && (
+        <div className="fixed top-6 right-6 z-[100] max-w-md rounded-2xl border border-sage-200 bg-white px-5 py-4 shadow-xl flex items-start gap-3">
+          <PiCheckCircleLight className="w-6 h-6 text-sage-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-charcoal-900">Thanh toán thành công</p>
+            <p className="text-sm text-charcoal-500 mt-1">{paymentSuccessMessage}</p>
+          </div>
+        </div>
+      )}
+
       {/* Page Header */}
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Hóa đơn</h1>
+          <h1 className="text-3xl font-serif text-charcoal-900 tracking-wide">Hóa đơn</h1>
           <p className="text-charcoal-400 mt-2 text-sm">Lập và quản lý hóa đơn thanh toán</p>
         </div>
         <Button onClick={openCreateModal}>
@@ -307,6 +403,71 @@ export function Invoices() {
         </div>
       </section>
 
+      {/* Bank balance changes */}
+      <section className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
+        <div className="px-7 py-5 border-b border-charcoal-100 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-wood-50 flex items-center justify-center">
+              <PiBankLight className="w-5 h-5 text-wood-600" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-charcoal-900">Biến động số dư gần đây</h2>
+              <p className="text-sm text-charcoal-400">Dữ liệu được nhận tự động từ webhook SePay</p>
+            </div>
+          </div>
+          {latestBalance !== null && (
+            <div className="text-right">
+              <p className="text-xs uppercase tracking-wider text-charcoal-400">Số dư mới nhất</p>
+              <p className="font-semibold text-charcoal-900">{latestBalance.toLocaleString('vi-VN')}đ</p>
+            </div>
+          )}
+        </div>
+
+        {bankTransactions.length === 0 ? (
+          <div className="px-7 py-8 text-sm text-charcoal-400">
+            Chưa có giao dịch ngân hàng. Sau khi webhook nhận giao dịch đầu tiên, dữ liệu sẽ xuất hiện tại đây.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px]">
+              <thead>
+                <tr className="border-b border-charcoal-100">
+                  <th className="text-left px-7 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Thời gian</th>
+                  <th className="text-left px-7 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Ngân hàng</th>
+                  <th className="text-left px-7 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Nội dung</th>
+                  <th className="text-right px-7 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Số tiền</th>
+                  <th className="text-right px-7 py-4 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Số dư</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-charcoal-50">
+                {bankTransactions.map((transaction) => (
+                  <tr key={transaction.id}>
+                    <td className="px-7 py-4 text-sm text-charcoal-500">
+                      {transaction.transaction_date
+                        ? new Date(transaction.transaction_date.replace(' ', 'T')).toLocaleString('vi-VN')
+                        : '—'}
+                    </td>
+                    <td className="px-7 py-4 text-sm text-charcoal-600">{transaction.gateway || '—'}</td>
+                    <td className="px-7 py-4">
+                      <p className="text-sm text-charcoal-700 max-w-md truncate">{transaction.content || '—'}</p>
+                      {transaction.payment_code && (
+                        <p className="text-xs text-charcoal-400 mt-1">Mã: {transaction.payment_code}</p>
+                      )}
+                    </td>
+                    <td className={`px-7 py-4 text-right font-semibold ${transaction.transfer_type === 'in' ? 'text-sage-600' : 'text-rose-600'}`}>
+                      {transaction.transfer_type === 'in' ? '+' : '-'}{transaction.amount.toLocaleString('vi-VN')}đ
+                    </td>
+                    <td className="px-7 py-4 text-right text-sm text-charcoal-600">
+                      {transaction.accumulated !== null ? `${transaction.accumulated.toLocaleString('vi-VN')}đ` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {/* Filters */}
       <section className="space-y-4">
         <div className="flex gap-2 items-center flex-wrap">
@@ -330,22 +491,25 @@ export function Invoices() {
             </button>
           ))}
           <div className="ml-auto flex items-center gap-2">
-            <FilterDropdown 
-                value={filterMonth.toString()}
-                onChange={(v) => setFilterMonth(Number(v))}
-                options={[
-                  { value: '0', label: 'Tất cả tháng' },
-                  ...Array.from({ length: 12 }, (_, i) => ({ value: (i + 1).toString(), label: `Tháng ${i + 1}` }))
-                ]}
-              />
-            <FilterDropdown 
-                value={filterYear.toString()}
-                onChange={(v) => setFilterYear(Number(v))}
-                options={Array.from({ length: 11 }, (_, i) => {
-                  const y = (new Date().getFullYear() - 5 + i).toString();
-                  return { value: y, label: y };
-                })}
-              />
+            <select
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(Number(e.target.value))}
+              className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-900 transition-colors"
+            >
+              <option value={0}>Tất cả tháng</option>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                <option key={m} value={m}>Tháng {m}</option>
+              ))}
+            </select>
+            <select
+              value={filterYear}
+              onChange={(e) => setFilterYear(Number(e.target.value))}
+              className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-900 transition-colors"
+            >
+              {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - 5 + i).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
           </div>
         </div>
       </section>
@@ -361,69 +525,71 @@ export function Invoices() {
           />
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
-          <table className="w-full text-left border-collapse">
+        <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-x-auto">
+          <table className="w-full min-w-[1050px]">
             <thead>
-              <tr className="bg-cream-50/50 border-b border-cream-200 text-xs uppercase tracking-widest text-charcoal-500 font-semibold">
-                <th className="px-4 py-3">Kỳ hóa đơn</th>
-                <th className="px-4 py-3">Phòng</th>
-                <th className="px-4 py-3 text-center">Tiền phòng</th>
-                <th className="px-4 py-3 text-center">Điện + Nước</th>
-                <th className="px-4 py-3 text-center">Tổng</th>
-                <th className="px-4 py-3">Hạn</th>
-                <th className="px-4 py-3">Trạng thái</th>
-                <th className="px-4 py-3 text-right">Thao tác</th>
+              <tr className="border-b border-charcoal-100">
+                <th className="text-left px-7 py-5 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Kỳ hóa đơn</th>
+                <th className="text-left px-7 py-5 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Phòng</th>
+                <th className="text-right px-7 py-5 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Tiền phòng</th>
+                <th className="text-right px-7 py-5 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Điện + Nước</th>
+                <th className="text-right px-7 py-5 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Tổng</th>
+                <th className="text-left px-7 py-5 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Hạn</th>
+                <th className="text-left px-7 py-5 text-xs text-charcoal-400 uppercase tracking-wider font-semibold">Trạng thái</th>
+                <th className="px-7 py-5"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-cream-100">
+            <tbody className="divide-y divide-charcoal-50">
               {filteredInvoices.map((invoice) => (
-                <tr key={invoice.id} className="hover:bg-cream-50/50 transition-colors group">
-                  <td className="px-4 py-3 align-middle">
+                <tr key={invoice.id} className="hover:bg-cream-50/50 transition-colors">
+                  <td className="px-7 py-5">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-charcoal-50 flex items-center justify-center text-sm font-medium text-charcoal-600">
                         {invoice.invoice_month}/{invoice.invoice_year.toString().slice(-2)}
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3 align-middle">
-                    <p className="font-serif lining-nums tabular-nums font-medium text-wood-700">P.{invoice.room?.room_number}</p>
-                    <p className="text-xs text-charcoal-400 mt-0.5">{invoice.tenant?.full_name || '—'}</p>
+                  <td className="px-7 py-5">
+                    <p className="font-medium text-charcoal-900">{invoice.room?.room_number}</p>
+                    <p className="text-sm text-charcoal-400 mt-0.5">{invoice.tenant?.full_name || '—'}</p>
                   </td>
-                  <td className="px-4 py-3 text-center align-middle text-charcoal-600 font-serif lining-nums tabular-nums font-medium">
+                  <td className="px-7 py-5 text-right text-charcoal-600">
                     {invoice.room_rent.toLocaleString('vi-VN')}đ
                   </td>
-                  <td className="px-4 py-3 text-center align-middle text-charcoal-600 font-serif lining-nums tabular-nums font-medium">
+                  <td className="px-7 py-5 text-right text-charcoal-600">
                     {(invoice.electricity_cost + invoice.water_cost).toLocaleString('vi-VN')}đ
                   </td>
-                  <td className="px-4 py-3 text-center align-middle">
-                    <p className="font-serif lining-nums tabular-nums text-wood-700 font-bold text-lg">{invoice.total_amount.toLocaleString('vi-VN')}đ</p>
+                  <td className="px-7 py-5 text-right">
+                    <p className="font-semibold text-charcoal-900">{invoice.total_amount.toLocaleString('vi-VN')}đ</p>
                   </td>
-                  <td className="px-4 py-3 text-charcoal-400 align-middle font-serif lining-nums tabular-nums font-medium">
+                  <td className="px-7 py-5 text-charcoal-400">
                     {invoice.due_date ? new Date(invoice.due_date).toLocaleDateString('vi-VN') : '—'}
                   </td>
-                  <td className="px-4 py-3 align-middle">
+                  <td className="px-7 py-5">
                     <InvoiceStatusBadge status={invoice.status} />
                   </td>
-                  <td className="px-4 py-3 align-middle text-right">
-                    <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {invoice.status === 'pending' && (
-                        <button onClick={() => handleMarkPaid(invoice)} className="px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
-                          Thanh toán
-                        </button>
-                      )}
+                  <td className="px-7 py-5">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => openPaymentModal(invoice)}
+                        className="text-charcoal-400 hover:text-wood-600 p-2 transition-colors rounded-lg hover:bg-wood-50"
+                        title={invoice.status === 'paid' ? 'Xem thanh toán' : 'Tạo QR thanh toán'}
+                      >
+                        <PiQrCodeLight className="w-5 h-5" />
+                      </button>
                       <button
                         onClick={() => openEditModal(invoice)}
-                        className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200"
+                        className="text-charcoal-400 hover:text-wood-600 p-2 transition-colors rounded-lg hover:bg-wood-50 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-charcoal-400"
                         disabled={invoice.status === 'paid'}
-                        title="Sửa"
+                        title={invoice.status === 'paid' ? 'Hóa đơn đã khóa, không thể chỉnh sửa' : 'Chỉnh sửa hóa đơn'}
                       >
                         <PiPencilSimpleLight className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => openDeleteModal(invoice)}
-                        className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200"
+                        className="text-charcoal-400 hover:text-rose-600 p-2 transition-colors rounded-lg hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-charcoal-400"
                         disabled={invoice.status === 'paid'}
-                        title="Xóa"
+                        title={invoice.status === 'paid' ? 'Hóa đơn đã khóa, không thể xóa' : 'Xóa hóa đơn'}
                       >
                         <PiTrashLight className="w-4 h-4" />
                       </button>
@@ -584,6 +750,140 @@ export function Invoices() {
         </form>
       </Modal>
 
+      {/* QR Payment Modal */}
+      <Modal
+        isOpen={Boolean(paymentInvoice)}
+        onClose={closePaymentModal}
+        title={`Thanh toán hóa đơn${paymentInvoice?.room?.room_number ? ` - Phòng ${paymentInvoice.room.room_number}` : ''}`}
+        size="xl"
+      >
+        <div className="p-6">
+          {paymentLoading && !paymentInfo ? (
+            <div className="py-16 flex justify-center"><Spinner /></div>
+          ) : paymentError ? (
+            <div className="p-5 rounded-xl bg-rose-50 border border-rose-100 text-rose-700">
+              <p className="font-medium">Không thể tạo QR thanh toán</p>
+              <p className="text-sm mt-1">{paymentError}</p>
+            </div>
+          ) : paymentInfo ? (
+            <div className="grid lg:grid-cols-[360px_1fr] gap-7">
+              <div className="space-y-4">
+                <div className="relative min-h-[330px] overflow-hidden rounded-2xl border border-charcoal-100 p-4 bg-white">
+                  {paymentInfo.qr_locked || !paymentInfo.qr_url ? (
+                    <div className="flex min-h-[298px] items-center justify-center rounded-xl bg-cream-50">
+                      <PiQrCodeLight className="h-52 w-52 text-charcoal-300 blur-md opacity-25" />
+                    </div>
+                  ) : (
+                    <img
+                      src={paymentInfo.qr_url}
+                      alt={`QR thanh toán ${paymentInfo.payment_code}`}
+                      draggable={false}
+                      className="w-full rounded-xl select-none"
+                    />
+                  )}
+
+                  {paymentInfo.invoice_status === 'paid' && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/75 p-6 backdrop-blur-sm">
+                      <div className="text-center">
+                        <PiCheckCircleLight className="mx-auto h-16 w-16 text-sage-600" />
+                        <p className="mt-3 text-xl font-semibold text-charcoal-900">Hóa đơn đã thanh toán</p>
+                        <p className="mt-2 text-sm text-charcoal-500">
+                          QR đã bị khóa. Giao dịch dùng lại mã cũ sẽ không được cộng vào hóa đơn này.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-xl bg-cream-100 p-4 text-sm text-charcoal-600">
+                  {paymentInfo.invoice_status === 'paid' ? (
+                    <p className="flex items-center gap-2 text-sage-700">
+                      <PiCheckCircleLight className="h-4 w-4" />
+                      Hóa đơn đã hoàn thành và không thể chỉnh sửa hoặc xóa.
+                    </p>
+                  ) : (
+                    <>
+                      <p>Quét QR bằng ứng dụng ngân hàng. Không sửa số tiền hoặc nội dung chuyển khoản.</p>
+                      <p className="mt-2 flex items-center gap-2 text-wood-700">
+                        <PiArrowsClockwiseLight className="w-4 h-4" />
+                        Sau khi người thuê chuyển khoản, hệ thống kiểm tra mỗi 3 giây và tự khóa QR khi nhận đủ tiền.
+                      </p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-5">
+                <div className={`rounded-2xl border p-5 ${paymentInfo.invoice_status === 'paid' ? 'bg-sage-50 border-sage-100' : paymentInfo.payment_status === 'partial' ? 'bg-amber-50 border-amber-100' : 'bg-white border-charcoal-100'}`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-charcoal-400">Trạng thái thanh toán</p>
+                      <p className="text-xl font-semibold text-charcoal-900 mt-1">
+                        {paymentInfo.invoice_status === 'paid'
+                          ? 'Đã thanh toán đủ'
+                          : paymentInfo.payment_status === 'partial'
+                            ? 'Đã nhận một phần'
+                            : 'Đang chờ chuyển khoản'}
+                      </p>
+                    </div>
+                    {paymentInfo.invoice_status === 'paid' && <PiCheckCircleLight className="w-8 h-8 text-sage-600" />}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <PaymentAmount label="Cần thanh toán" value={paymentInfo.required_amount} />
+                  <PaymentAmount label="Đã nhận" value={paymentInfo.received_amount} />
+                  <PaymentAmount label="Còn thiếu" value={paymentInfo.remaining_amount} />
+                </div>
+
+                <div className="rounded-2xl border border-charcoal-100 divide-y divide-charcoal-100">
+                  <PaymentDetailRow label="Ngân hàng" value={paymentInfo.bank.bank_id} />
+                  <PaymentDetailRow
+                    label="Số tài khoản"
+                    value={paymentInfo.bank.account_number}
+                    action={<button onClick={() => copyText(paymentInfo.bank.account_number)} className="p-2 hover:bg-cream-100 rounded-lg" title="Sao chép"><PiCopyLight className="w-4 h-4" /></button>}
+                  />
+                  <PaymentDetailRow label="Chủ tài khoản" value={paymentInfo.bank.account_name} />
+                  <PaymentDetailRow
+                    label="Nội dung chuyển khoản"
+                    value={paymentInfo.payment_code}
+                    action={paymentInfo.invoice_status === 'paid' ? undefined : (
+                      <button onClick={() => copyText(paymentInfo.payment_code)} className="p-2 hover:bg-cream-100 rounded-lg" title="Sao chép">
+                        <PiCopyLight className="w-4 h-4" />
+                      </button>
+                    )}
+                  />
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-charcoal-900 mb-3">Giao dịch khớp hóa đơn</h3>
+                  {paymentInfo.transactions.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-charcoal-200 p-5 text-sm text-charcoal-400">
+                      Chưa nhận được giao dịch có mã thanh toán này.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {paymentInfo.transactions.map((transaction) => (
+                        <div key={transaction.id} className="rounded-xl border border-charcoal-100 p-4 flex items-center justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-charcoal-800">{transaction.gateway || 'Ngân hàng'}</p>
+                            <p className="text-xs text-charcoal-400 mt-1">
+                              {transaction.transaction_date
+                                ? new Date(transaction.transaction_date.replace(' ', 'T')).toLocaleString('vi-VN')
+                                : 'Không có thời gian'}
+                            </p>
+                          </div>
+                          <p className="font-semibold text-sage-600">+{transaction.amount.toLocaleString('vi-VN')}đ</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
       {/* Delete Modal */}
       <Modal
         isOpen={isDeleteModalOpen}
@@ -606,6 +906,27 @@ export function Invoices() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function PaymentAmount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl bg-cream-100 p-4">
+      <p className="text-xs text-charcoal-400">{label}</p>
+      <p className="font-semibold text-charcoal-900 mt-1">{value.toLocaleString('vi-VN')}đ</p>
+    </div>
+  );
+}
+
+function PaymentDetailRow({ label, value, action }: { label: string; value: string; action?: React.ReactNode }) {
+  return (
+    <div className="px-5 py-4 flex items-center justify-between gap-4">
+      <span className="text-sm text-charcoal-400">{label}</span>
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="font-medium text-charcoal-800 text-right break-all">{value}</span>
+        {action}
+      </div>
     </div>
   );
 }

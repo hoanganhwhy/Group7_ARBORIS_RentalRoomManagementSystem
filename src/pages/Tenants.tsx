@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   PiPlusLight, 
   PiUsersLight, 
@@ -6,7 +6,6 @@ import {
   PiTrashLight, 
   PiPhoneLight, 
   PiEnvelopeSimpleLight, 
-  PiHouseLineLight, 
   PiCrownLight, 
   PiSignOutLight, 
   PiUserPlusLight, 
@@ -15,7 +14,6 @@ import {
   PiEyeSlashLight,
   PiIdentificationCardLight,
   PiCaretDownLight,
-  PiCheckLight,
   PiFadersLight,
   PiDownloadSimpleLight,
   PiXLight,
@@ -23,9 +21,8 @@ import {
   PiSquareLight
 } from 'react-icons/pi';
 import { Modal } from '../components/ui/Modal';
-import { FilterDropdown } from '../components/ui/FilterDropdown';
 import { Button } from '../components/ui/Button';
-import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { Input, Spinner, EmptyState } from '../components/ui/Input';
 import {
   getTenants,
   createTenant,
@@ -64,7 +61,6 @@ function parsePhone(phone: string) {
   
   return { countryCode: '+84', body: phone };
 }
-
 
 export function Tenants() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -148,9 +144,14 @@ export function Tenants() {
 
   async function loadData() {
     try {
-      const [tenantsData, roomsData] = await Promise.all([getTenants(), getRooms()]);
+      const [tenantsData, roomsData, invoicesData] = await Promise.all([
+        getTenants(),
+        getRooms(),
+        getInvoices(),
+      ]);
       setTenants(tenantsData);
       setRooms(roomsData);
+      setInvoices(invoicesData);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -158,16 +159,12 @@ export function Tenants() {
     }
   }
 
-  function getTenantAssignments(tenantId: string): { room: Room; assignment: RoomAssignment }[] {
-    const assignments: { room: Room; assignment: RoomAssignment }[] = [];
+  function getTenantAssignment(tenantId: string): { room: Room; assignment: RoomAssignment } | null {
     for (const room of rooms) {
-      if (room.active_assignments) {
-        room.active_assignments.filter((a) => a.tenant_id === tenantId).forEach((a) => {
-          assignments.push({ room, assignment: a });
-        });
-      }
+      const found = room.active_assignments?.find((a) => a.tenant_id === tenantId);
+      if (found) return { room, assignment: found };
     }
-    return assignments;
+    return null;
   }
 
   function toggle(set: Set<string>, setFn: (s: Set<string>) => void, id: string) {
@@ -187,9 +184,9 @@ export function Tenants() {
     
     const headers = ['Họ tên', 'Số điện thoại', 'Email', 'CCCD/CMND', 'Phòng', 'Vai trò'];
     const rows = data.map(t => {
-      const infos = getTenantAssignments(t.id);
-        const roomStr = infos.length > 0 ? infos.map(i => i.room.room_number).join(', ') : 'Chưa xếp phòng';
-        const roleStr = infos.some(i => i.assignment.is_primary) ? 'Chủ hộ' : (infos.length > 0 ? 'Thành viên' : '');
+      const info = getTenantAssignment(t.id);
+      const roomStr = info ? info.room.room_number : 'Chưa xếp phòng';
+      const roleStr = info?.assignment?.is_primary ? 'Chủ hộ' : 'Thành viên';
       return [t.full_name, t.phone || '', t.email || '', t.id_card_number || '', roomStr, roleStr];
     });
     
@@ -227,10 +224,9 @@ export function Tenants() {
     return visible + '•'.repeat(Math.min(local.length - visible.length, 6)) + '@' + domain;
   }
 
-  let filteredTenants = tenants.filter((t) => {
+  const filteredTenants = tenants.filter((t) => {
     // 1. Search filter
     if (searchQuery) {
-      const query = searchQuery.toLowerCase().replace(/\D/g, '') || searchQuery.toLowerCase();
       const nameMatch = t.full_name.toLowerCase().includes(searchQuery.toLowerCase());
       const queryDigits = searchQuery.replace(/\D/g, '');
       const phoneMatch = t.phone
@@ -242,24 +238,24 @@ export function Tenants() {
 
     // 2. Primary Tenant Filter
     if (primaryFilter !== 'all') {
-      const infos = getTenantAssignments(t.id);
-        const isPrimary = infos.some(info => info.assignment.is_primary);
-        if (primaryFilter === 'primary' && !isPrimary) return false;
-        if (primaryFilter === 'non_primary' && (isPrimary || infos.length === 0)) return false;
+      const assignmentInfo = getTenantAssignment(t.id);
+      const isPrimary = assignmentInfo?.assignment?.is_primary === true;
+      if (primaryFilter === 'primary' && !isPrimary) return false;
+      if (primaryFilter === 'non_primary' && isPrimary) return false;
     }
 
     // 3. Room Filter
     if (roomFilter !== 'all') {
-      const infos = getTenantAssignments(t.id);
-        if (!infos.some(info => info.room.id === roomFilter)) return false;
+      const assignmentInfo = getTenantAssignment(t.id);
+      if (assignmentInfo?.room.id !== roomFilter) return false;
     }
 
     // 4. Debt Filter
     if (debtFilter === 'debt') {
-      const infos = getTenantAssignments(t.id);
-        if (infos.length === 0) return false;
-        const hasDebt = infos.some(info => invoices.some(inv => inv.room_id === info.room.id && (inv.status === 'pending' || inv.status === 'overdue')));
-        if (!hasDebt) return false;
+      const assignmentInfo = getTenantAssignment(t.id);
+      if (!assignmentInfo) return false;
+      const hasDebt = invoices.some(inv => inv.room_id === assignmentInfo.room.id && (inv.status === 'pending' || inv.status === 'overdue'));
+      if (!hasDebt) return false;
     }
 
     // 5. Legal Filter
@@ -275,12 +271,13 @@ export function Tenants() {
     if (sortBy === 'name_asc') {
       return a.full_name.localeCompare(b.full_name, 'vi-VN');
     } else if (sortBy === 'expiration_asc') {
-      const aInfos = getTenantAssignments(a.id);
-        const bInfos = getTenantAssignments(b.id);
-        const getMinDate = (infos: any[]) => Math.min(...infos.map(i => i.assignment.contract_end_date ? new Date(i.assignment.contract_end_date).getTime() : Infinity));
-        const aDate = aInfos.length > 0 ? getMinDate(aInfos) : Infinity;
-        const bDate = bInfos.length > 0 ? getMinDate(bInfos) : Infinity;
-        return aDate - bDate;
+      const aInfo = getTenantAssignment(a.id);
+      const bInfo = getTenantAssignment(b.id);
+      
+      const aDate = aInfo?.assignment?.contract_end_date ? new Date(aInfo.assignment.contract_end_date).getTime() : Infinity;
+      const bDate = bInfo?.assignment?.contract_end_date ? new Date(bInfo.assignment.contract_end_date).getTime() : Infinity;
+      
+      return aDate - bDate;
     }
     return 0;
   });
@@ -455,7 +452,7 @@ export function Tenants() {
       {/* Page Header */}
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Người thuê</h1>
+          <h1 className="text-3xl font-serif text-charcoal-900 tracking-wide">Người thuê</h1>
           <p className="text-charcoal-400 mt-2 text-sm">Quản lý thông tin khách thuê và hợp đồng</p>
         </div>
         <Button onClick={openCreateModal}>
@@ -488,25 +485,29 @@ export function Tenants() {
                   className="w-full pl-11 pr-5 py-2.5 text-sm rounded-full border border-charcoal-100 hover:border-charcoal-200 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-800 transition-colors shadow-soft outline-none"
                 />
               </div>
-              <FilterDropdown 
-                  value={primaryFilter} 
-                  onChange={(val) => setPrimaryFilter(val as any)} 
-                  options={[
-                    { value: 'all', label: 'Tất cả người thuê' },
-                    { value: 'primary', label: 'Chủ hợp đồng' },
-                    { value: 'non_primary', label: 'Thành viên' }
-                  ]}
-                  className="min-w-[180px]"
-                />
-              <FilterDropdown 
-                  value={sortBy} 
-                  onChange={(val) => setSortBy(val as any)} 
-                  options={[
-                    { value: 'name_asc', label: 'Sắp xếp: Tên A-Z' },
-                    { value: 'expiration_asc', label: 'Hết hạn gần nhất' }
-                  ]}
-                  className="min-w-[180px]"
-                />
+              <div className="relative min-w-[180px]">
+                <select
+                  value={primaryFilter}
+                  onChange={(e) => setPrimaryFilter(e.target.value as any)}
+                  className="appearance-none w-full pl-5 pr-10 py-2.5 text-sm rounded-full border border-charcoal-100 hover:border-charcoal-200 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-800 transition-colors shadow-soft cursor-pointer outline-none"
+                >
+                  <option value="all">Tất cả người thuê</option>
+                  <option value="primary">Chủ hợp đồng</option>
+                  <option value="non_primary">Thành viên</option>
+                </select>
+                <PiCaretDownLight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400 pointer-events-none" />
+              </div>
+              <div className="relative min-w-[180px]">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className="appearance-none w-full pl-5 pr-10 py-2.5 text-sm rounded-full border border-charcoal-100 hover:border-charcoal-200 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-800 transition-colors shadow-soft cursor-pointer outline-none"
+                >
+                  <option value="name_asc">Sắp xếp: Tên A-Z</option>
+                  <option value="expiration_asc">Hết hạn gần nhất</option>
+                </select>
+                <PiCaretDownLight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400 pointer-events-none" />
+              </div>
             </div>
               <button
                 onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
@@ -525,15 +526,19 @@ export function Tenants() {
                 {/* Room Filter */}
                 <div className="space-y-2">
                   <label className="text-xs font-semibold text-charcoal-500 uppercase tracking-wider">Phòng / Căn hộ</label>
-                  <FilterDropdown 
-                      value={roomFilter} 
-                      onChange={(val) => setRoomFilter(val)} 
-                      options={[
-                        { value: 'all', label: 'Tất cả phòng' },
-                        ...rooms.map(r => ({ value: r.id, label: `Phòng ${r.room_number}` }))
-                      ]}
-                      className="w-full"
-                    />
+                  <div className="relative">
+                    <select
+                      value={roomFilter}
+                      onChange={(e) => setRoomFilter(e.target.value)}
+                      className="appearance-none w-full pl-4 pr-10 py-2.5 text-sm rounded-xl border border-charcoal-100 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-800 outline-none shadow-sm cursor-pointer"
+                    >
+                      <option value="all">Tất cả phòng</option>
+                      {rooms.map(r => (
+                        <option key={r.id} value={r.id}>Phòng {r.room_number}</option>
+                      ))}
+                    </select>
+                    <PiCaretDownLight className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400 pointer-events-none" />
+                  </div>
                 </div>
 
                 {/* Legal Status Filter */}
@@ -583,10 +588,19 @@ export function Tenants() {
               <div className="text-sm text-wood-800 font-medium">
                 Đã chọn <span className="font-bold">{selectedTenants.size}</span> người thuê
               </div>
-              <Button size="sm" onClick={exportCSV} className="bg-wood-600 hover:bg-wood-700 text-white rounded-full">
-                <PiDownloadSimpleLight className="w-4 h-4 mr-2" />
-                Xuất danh sách (.csv)
-              </Button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTenants(new Set())}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-charcoal-600 hover:text-charcoal-900"
+                >
+                  <PiXLight className="w-4 h-4" /> Bỏ chọn
+                </button>
+                <Button size="sm" onClick={exportCSV} className="bg-wood-600 hover:bg-wood-700 text-white rounded-full">
+                  <PiDownloadSimpleLight className="w-4 h-4 mr-2" />
+                  Xuất danh sách (.csv)
+                </Button>
+              </div>
             </div>
           )}
 
@@ -595,6 +609,18 @@ export function Tenants() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-cream-50/50 border-b border-cream-200 text-xs uppercase tracking-widest text-charcoal-500 font-semibold">
+                  <th className="px-4 py-3 w-10">
+                    <button
+                      type="button"
+                      onClick={toggleAllSelection}
+                      className="text-charcoal-500 hover:text-wood-700"
+                      aria-label="Chọn tất cả người thuê"
+                    >
+                      {filteredTenants.length > 0 && selectedTenants.size === filteredTenants.length
+                        ? <PiCheckSquareLight className="w-5 h-5" />
+                        : <PiSquareLight className="w-5 h-5" />}
+                    </button>
+                  </th>
                   <th className="px-4 py-3">Khách Thuê</th>
                   <th className="px-4 py-3">Phòng</th>
                   <th className="px-4 py-3">Liên Hệ</th>
@@ -605,30 +631,45 @@ export function Tenants() {
               <tbody className="divide-y divide-cream-100">
                 {filteredTenants.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-charcoal-400 italic text-sm">
+                    <td colSpan={6} className="px-4 py-8 text-center text-charcoal-400 italic text-sm">
                       Không tìm thấyngười thuê nào phù hợp.
                     </td>
                   </tr>
                 ) : (
                   filteredTenants.map((tenant) => {
-                    const infos = getTenantAssignments(tenant.id);
-                      const isPhoneVisible = visiblePhones.has(tenant.id);
+                    const info = getTenantAssignment(tenant.id);
+                    const isPhoneVisible = visiblePhones.has(tenant.id);
+                    const isEmailVisible = visibleEmails.has(tenant.id);
+                    const isIDVisible = visibleIDs.has(tenant.id);
+                    const isSelected = selectedTenants.has(tenant.id);
                     const hue = tenant.full_name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 360;
                     const avatarStyle = { background: `linear-gradient(135deg, hsl(${hue}, 70%, 65%), hsl(${hue + 20}, 70%, 50%))` };
 
                     return (
                       <tr key={tenant.id} className="hover:bg-cream-50/50 transition-colors group">
                         <td className="px-4 py-2.5 align-top">
+                          <button
+                            type="button"
+                            onClick={() => toggleTenantSelection(tenant.id)}
+                            className="mt-2 text-charcoal-400 hover:text-wood-700"
+                            aria-label={`Chọn ${tenant.full_name}`}
+                          >
+                            {isSelected
+                              ? <PiCheckSquareLight className="w-5 h-5" />
+                              : <PiSquareLight className="w-5 h-5" />}
+                          </button>
+                        </td>
+                        <td className="px-4 py-2.5 align-top">
                           <div className="flex items-center gap-3">
                             <div 
-                              className="w-9 h-9 rounded-full flex items-center justify-center text-white font-serif lining-nums tabular-nums text-base shrink-0 shadow-sm"
+                              className="w-9 h-9 rounded-full flex items-center justify-center text-white font-serif text-base shrink-0 shadow-sm"
                               style={avatarStyle}
                             >
                               {tenant.full_name.charAt(0).toUpperCase()}
                             </div>
                             <div>
-                              <p className="font-serif lining-nums tabular-nums text-charcoal-900 font-medium text-base">{tenant.full_name}</p>
-                              {infos.some(i => i.assignment.is_primary) && (
+                              <p className="font-serif text-charcoal-900 font-medium text-base">{tenant.full_name}</p>
+                              {info?.assignment?.is_primary && (
                                 <span className="inline-flex items-center gap-1 text-[10px] bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md border border-amber-100 mt-0.5 uppercase font-semibold tracking-wider">
                                   <PiCrownLight className="w-3 h-3" /> Chủ HĐ
                                 </span>
@@ -637,21 +678,12 @@ export function Tenants() {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 align-top">
-                          {infos.length > 0 ? (
-                            <div className="flex flex-col gap-2 pt-1">
-                              {infos.map((info, idx) => (
-                                <div key={idx} className="flex flex-col gap-0.5">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-serif lining-nums tabular-nums font-medium text-wood-700">P.{info.room.room_number}</span>
-                                    {info.assignment.is_primary && (
-                                      <PiCrownLight className="w-3.5 h-3.5 text-amber-500" title="Chủ hợp đồng" />
-                                    )}
-                                  </div>
-                                  <span className="text-[10px] text-charcoal-400">
-                                    Hết hạn: {info.assignment.contract_end_date ? new Date(info.assignment.contract_end_date).toLocaleDateString('vi-VN') : '—'}
-                                  </span>
-                                </div>
-                              ))}
+                          {info ? (
+                            <div className="flex flex-col gap-0.5 pt-1">
+                              <span className="font-serif font-medium text-wood-700">P.{info.room.room_number}</span>
+                              <span className="text-[10px] text-charcoal-400">
+                                Hết hạn: {info.assignment.contract_end_date ? new Date(info.assignment.contract_end_date).toLocaleDateString('vi-VN') : '—'}
+                              </span>
                             </div>
                           ) : (
                             <span className="text-sm text-charcoal-400 italic pt-1 inline-block">Chưa có</span>
@@ -673,7 +705,12 @@ export function Tenants() {
                             {tenant.email && (
                               <div className="flex items-center gap-2 text-sm text-charcoal-700">
                                 <PiEnvelopeSimpleLight className="w-3.5 h-3.5 text-charcoal-400 shrink-0" />
-                                <span className="text-[11px] truncate max-w-[120px]" title={tenant.email}>{tenant.email}</span>
+                                <span className="text-[11px] truncate max-w-[120px]" title={isEmailVisible ? tenant.email : undefined}>
+                                  {isEmailVisible ? tenant.email : maskEmail(tenant.email)}
+                                </span>
+                                <button onClick={() => toggle(visibleEmails, setVisibleEmails, tenant.id)} className="p-0.5 hover:bg-cream-100 rounded text-charcoal-400">
+                                  {isEmailVisible ? <PiEyeSlashLight className="w-3.5 h-3.5" /> : <PiEyeLight className="w-3.5 h-3.5" />}
+                                </button>
                               </div>
                             )}
                           </div>
@@ -682,27 +719,30 @@ export function Tenants() {
                           {tenant.id_card_number ? (
                             <div className="flex items-center gap-2 text-sm text-charcoal-700 pt-1">
                               <PiIdentificationCardLight className="w-3.5 h-3.5 text-charcoal-400 shrink-0" />
-                              <span className="font-mono text-xs">{maskValue(tenant.id_card_number, 3)}</span>
+                              <span className="font-mono text-xs">{isIDVisible ? tenant.id_card_number : maskValue(tenant.id_card_number, 3)}</span>
+                              <button onClick={() => toggle(visibleIDs, setVisibleIDs, tenant.id)} className="p-0.5 hover:bg-cream-100 rounded text-charcoal-400">
+                                {isIDVisible ? <PiEyeSlashLight className="w-3.5 h-3.5" /> : <PiEyeLight className="w-3.5 h-3.5" />}
+                              </button>
                             </div>
                           ) : (
                             <span className="text-xs text-charcoal-400 italic pt-1 inline-block">—</span>
                           )}
                         </td>
                         <td className="px-4 py-2.5 align-top text-right">
-                          <div className="flex justify-end items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pt-1">
-                            <button onClick={() => openAssignModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Gán phòng">
-                              <PiUserPlusLight className="w-4 h-4" />
-                            </button>
-                            {infos.map((info, idx) => (
-                              <button key={idx} onClick={() => handleCheckout(info.assignment)} className="flex items-center gap-1 p-1.5 rounded-lg text-amber-500 hover:text-amber-700 hover:bg-amber-50 transition-colors bg-white border border-transparent hover:border-amber-200" title={`Trả phòng ${info.room.room_number}`}>
-                                <PiSignOutLight className="w-4 h-4" />
-                                <span className="text-[10px] font-medium leading-none font-mono">{info.room.room_number}</span>
+                          <div className="flex justify-end items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity pt-0.5">
+                            {!info ? (
+                              <button onClick={() => openAssignModal(tenant)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-wood-700 bg-wood-50 hover:bg-wood-100 rounded-lg border border-wood-200 transition-colors">
+                                <PiUserPlusLight className="w-3.5 h-3.5" /> Gán
                               </button>
-                            ))}
-                            <button onClick={() => openEditModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Sửa thông tin">
+                            ) : (
+                              <button onClick={() => handleCheckout(info.assignment)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 transition-colors">
+                                <PiSignOutLight className="w-3.5 h-3.5" /> Trả
+                              </button>
+                            )}
+                            <button onClick={() => openEditModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors">
                               <PiPencilSimpleLight className="w-4 h-4" />
                             </button>
-                            <button onClick={() => openDeleteModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200" title="Xóa khách thuê">
+                            <button onClick={() => openDeleteModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors">
                               <PiTrashLight className="w-4 h-4" />
                             </button>
                           </div>
