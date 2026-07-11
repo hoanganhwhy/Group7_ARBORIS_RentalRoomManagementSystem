@@ -114,3 +114,8 @@ Sau đó, truy cập bằng Admin vào mục **Tài khoản** để cấp phát 
 
 **Đọc thêm tài liệu API:**
 Xem file `API.md` để lấy danh sách đầy đủ toàn bộ Web Endpoints của hệ thống!
+
+
+## Cấu Trúc Mã Nguồn (Refactored)
+- **Frontend**: Component được chia nhỏ (ví dụ: src/components/rooms/RoomDetailModal.tsx). Các API calls được gom chung vào src/lib/api.ts để DRY.
+- **Backend**: Sử dụng Global Error Handler tại src/middleware/errorHandler.js kết hợp với catchAsync.js. Dữ liệu được xử lý qua Repository/Service Pattern thay vì gộp chung trong server.js.

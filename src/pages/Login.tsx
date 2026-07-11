@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Building2, LogIn, Lock, User } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { loginUser, loginGoogle } from '../lib/api';
 
 export function Login() {
   const { login } = useAuth();
@@ -18,18 +18,7 @@ export function Login() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-        credentials: 'include' // Important for HttpOnly cookies
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Đăng nhập thất bại');
-      }
-
+      const data = await loginUser({ username, password });
       login(data.user);
     } catch (err: any) {
       setError(err.message);
@@ -40,16 +29,7 @@ export function Login() {
 
   const handleGoogleSuccess = async (credentialResponse: any) => {
     try {
-      const res = await fetch(`${API_URL}/auth/google-login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: credentialResponse.credential }),
-        credentials: 'include'
-      });
-      
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Google login failed');
-      
+      const data = await loginGoogle(credentialResponse.credential);
       login(data.user);
     } catch (err: any) {
       setError(err.message);

@@ -378,3 +378,22 @@ export async function markNotificationAsRead(id: number): Promise<any> {
     method: 'PATCH'
   });
 }
+export async function loginUser(data: any): Promise<any> {
+  return request<any>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
+}
+
+export async function loginGoogle(token: string): Promise<any> {
+  return request<any>('/auth/google-login', {
+    method: 'POST',
+    body: JSON.stringify({ token })
+  });
+}
+
+export async function generateContract(assignmentId: string): Promise<any> {
+  return request<any>(/contracts/ + assignmentId + /generate, {
+    method: 'POST'
+  });
+}
