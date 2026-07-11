@@ -311,6 +311,7 @@ export function Repairs() {
             <RepairCard
               key={repair.id}
               repair={repair}
+              isTenant={isTenant}
               onView={() => openDetailModal(repair)}
               onEdit={(e) => openEditModal(repair, e)}
               onDelete={(e) => openDeleteModal(repair, e)}
@@ -493,12 +494,14 @@ export function Repairs() {
 
 function RepairCard({
   repair,
+  isTenant,
   onView,
   onEdit,
   onDelete,
   onStatusChange,
 }: {
   repair: RepairRequest;
+  isTenant: boolean;
   onView: () => void;
   onEdit: (e: React.MouseEvent) => void;
   onDelete: (e: React.MouseEvent) => void;
@@ -564,24 +567,28 @@ function RepairCard({
 
           {/* Actions */}
           <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-            {repair.status === 'new' && (
+            {repair.status === 'new' && !isTenant && (
               <button onClick={(e) => { e.stopPropagation(); onStatusChange(repair, 'in_progress'); }}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-terra-600 bg-terra-50 hover:bg-terra-100 rounded-xl transition-colors">
                 <Clock className="w-4 h-4" />Bắt đầu
               </button>
             )}
-            {repair.status === 'in_progress' && (
+            {repair.status === 'in_progress' && !isTenant && (
               <button onClick={(e) => { e.stopPropagation(); onStatusChange(repair, 'resolved'); }}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-xl transition-colors">
                 <CheckCircle className="w-4 h-4" />Hoàn thành
               </button>
             )}
-            <button onClick={onEdit} className="p-2.5 rounded-xl text-charcoal-400 hover:text-charcoal-600 hover:bg-charcoal-50 transition-colors">
-              <Edit2 className="w-4 h-4" />
-            </button>
-            <button onClick={onDelete} className="p-2.5 rounded-xl text-charcoal-400 hover:text-rose-500 hover:bg-rose-50 transition-colors">
-              <Trash2 className="w-4 h-4" />
-            </button>
+            {(!isTenant || repair.status === 'new') && (
+              <>
+                <button onClick={onEdit} className="p-2.5 rounded-xl text-charcoal-400 hover:text-charcoal-600 hover:bg-charcoal-50 transition-colors">
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button onClick={onDelete} className="p-2.5 rounded-xl text-charcoal-400 hover:text-rose-500 hover:bg-rose-50 transition-colors">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -5,7 +5,7 @@ import { GoogleLogin } from '@react-oauth/google';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-export function Login({ onNavigateToRegister }: { onNavigateToRegister: () => void }) {
+export function Login() {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -164,13 +164,7 @@ export function Login({ onNavigateToRegister }: { onNavigateToRegister: () => vo
 
           <div className="mt-6 text-center text-sm">
             <p className="text-charcoal-600">
-              Chưa có tài khoản?{' '}
-              <button 
-                onClick={onNavigateToRegister} 
-                className="font-medium text-terra-600 hover:text-terra-500 bg-transparent border-none p-0 cursor-pointer"
-              >
-                Đăng ký ngay để trải nghiệm
-              </button>
+              Vui lòng liên hệ Chủ nhà trọ để được cấp tài khoản đăng nhập.
             </p>
           </div>
         </div>

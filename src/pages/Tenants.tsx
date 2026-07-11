@@ -11,7 +11,7 @@ import {
   getRooms,
   assignTenantToRoom,
   endRoomAssignment,
-  getExpiringContracts,
+  getExpiringContracts
 } from '../lib/api';
 import type { Tenant, Room, RoomAssignment } from '../types';
 
@@ -359,7 +359,7 @@ export function Tenants() {
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-semibold text-charcoal-900 tracking-tight">Người thuê</h1>
-          <p className="text-charcoal-400 mt-2 text-base">Quản lý thông tin chi tiết của người thuê</p>
+          <p className="text-charcoal-400 mt-2 text-base">Quản lý thông tin chi tiết của người thuê và duyệt tài khoản</p>
         </div>
         <Button onClick={openCreateModal}>
           <Plus className="w-4 h-4" />
@@ -465,8 +465,6 @@ export function Tenants() {
           </div>
         </>
       )}
-
-      {/* Create/Edit Modal */}
 
       {/* Create/Edit Modal */}
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingTenant ? 'Sửa thông tin' : 'Thêm người thuê mới'} size="lg">

@@ -1,4 +1,4 @@
-import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest } from '../types';
+import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest, RoommateRequest } from '../types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -52,6 +52,26 @@ export async function updateRoom(id: string, room: Partial<Room>): Promise<Room>
 export async function deleteRoom(id: string): Promise<void> {
   return request<void>(`/rooms/${id}`, {
     method: 'DELETE',
+  });
+}
+
+// Users API
+export async function getAdminUsers(): Promise<any[]> {
+  return request<any[]>('/admin/users');
+}
+
+export async function createTenantUser(username: string, password: string, full_name: string, phone: string): Promise<any> {
+  return request<any>('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, full_name, phone })
+  });
+}
+
+// AI API
+export async function sendAiMessage(message: string, role: string, tenantId?: string, history: any[] = []): Promise<{ reply: string }> {
+  return request<{ reply: string }>('/ai/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message, role, tenant_id: tenantId, history })
   });
 }
 
@@ -235,6 +255,28 @@ export async function deleteRepairRequest(id: string): Promise<void> {
   });
 }
 
+// Roommate Requests API
+export async function getRoommateRequests(): Promise<RoommateRequest[]> {
+  return request<RoommateRequest[]>('/roommates');
+}
+
+export async function getMyRoommateRequests(): Promise<RoommateRequest[]> {
+  return request<RoommateRequest[]>('/roommates/my-requests');
+}
+
+export async function createRoommateRequest(data: { tieu_de: string; mo_ta?: string; gia_chia_se: number }): Promise<RoommateRequest> {
+  return request<RoommateRequest>('/roommates', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function closeRoommateRequest(id: number): Promise<{ success: boolean; message: string }> {
+  return request<{ success: boolean; message: string }>(`/roommates/${id}/close`, {
+    method: 'PUT',
+  });
+}
+
 // Dashboard stats
 export async function getDashboardStats() {
   const [rooms, tenants, invoices, repairs] = await Promise.all([
@@ -306,4 +348,33 @@ export async function updateSettings(data: any) {
   });
   if (!res.ok) throw new Error('Failed to update settings');
   return res.json();
+}
+
+// --- NOTIFICATIONS API ---
+export async function getNotifications(): Promise<any> {
+  return request<any>('/notifications/my');
+}
+
+export async function getNotificationDetail(id: number): Promise<any> {
+  return request<any>(`/notifications/${id}`);
+}
+
+export async function sendNotification(data: { title: string, content: string, targetType: 'all'|'personal', targetTenantId?: string }): Promise<any> {
+  return request<any>('/notifications', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
+}
+
+export async function replyNotification(id: number, content: string): Promise<any> {
+  return request<any>(`/notifications/${id}/replies`, {
+    method: 'POST',
+    body: JSON.stringify({ content })
+  });
+}
+
+export async function markNotificationAsRead(id: number): Promise<any> {
+  return request<any>(`/notifications/${id}/read`, {
+    method: 'PATCH'
+  });
 }

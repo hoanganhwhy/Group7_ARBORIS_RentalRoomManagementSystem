@@ -2,30 +2,27 @@ import { useState } from 'react';
 import { Sidebar } from './components/ui/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { TenantDashboard } from './pages/TenantDashboard';
+import NotificationsAdmin from './pages/NotificationsAdmin';
+import NotificationsTenant from './pages/NotificationsTenant';
 import { Rooms } from './pages/Rooms';
 import { Tenants } from './pages/Tenants';
 import { MeterReadings } from './pages/MeterReadings';
 import { Invoices } from './pages/Invoices';
 import { Repairs } from './pages/Repairs';
 import { Login } from './pages/Login';
-import { Register } from './pages/Register';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import type { Page } from './types';
 
 function AppContent() {
   const { user, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
-  const [authPage, setAuthPage] = useState<'login' | 'register'>('login');
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center bg-cream-50"><div className="w-8 h-8 border-4 border-terra-500 border-t-transparent rounded-full animate-spin"></div></div>;
   }
 
   if (!user) {
-    if (authPage === 'register') {
-      return <Register onNavigateToLogin={() => setAuthPage('login')} />;
-    }
-    return <Login onNavigateToRegister={() => setAuthPage('register')} />;
+    return <Login />;
   }
 
   const renderPage = () => {
@@ -43,6 +40,8 @@ function AppContent() {
         return <Invoices />;
       case 'repairs':
         return <Repairs />;
+      case 'notifications':
+        return user?.role === 'TENANT' ? <NotificationsTenant /> : <NotificationsAdmin />;
 
       default:
         return <Dashboard onNavigate={setCurrentPage} />;

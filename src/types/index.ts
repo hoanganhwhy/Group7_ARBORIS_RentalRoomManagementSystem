@@ -15,6 +15,12 @@ export interface Room {
   status: 'available' | 'occupied' | 'maintenance';
   max_occupants: number;
   description: string | null;
+  address?: string | null;
+  distance_km?: number;
+  air_conditioner?: boolean;
+  washing_machine?: boolean;
+  furnished?: boolean;
+  balcony?: boolean;
   created_at: string;
   updated_at: string;
   current_tenant?: Tenant | null;
@@ -112,4 +118,27 @@ export interface RepairRequest {
   tenant?: Tenant;
 }
 
-export type Page = 'dashboard' | 'rooms' | 'tenants' | 'meter-readings' | 'invoices' | 'repairs';
+export interface RoommateRequest {
+  id: number;
+  khach_thue_id?: number;
+  phong_id?: number;
+  tieu_de: string;
+  mo_ta: string | null;
+  gia_chia_se: number;
+  trang_thai?: 'open' | 'closed';
+  ngay_dang: string;
+  ngay_cap_nhat?: string;
+  // Bổ sung các trường từ JOIN query
+  so_phong?: string;
+  dien_tich?: number;
+  dieu_hoa?: number;
+  may_giat?: number;
+  noi_that?: number;
+  ban_cong?: number;
+  dia_chi?: string | null;
+  ten_nha_tro?: string | null;
+  ho_ten?: string;
+  so_dien_thoai?: string | null;
+}
+
+export type Page = 'dashboard' | 'rooms' | 'tenants' | 'user-management' | 'meter-readings' | 'invoices' | 'repairs' | 'roommates' | 'notifications';

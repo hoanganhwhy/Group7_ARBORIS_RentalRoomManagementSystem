@@ -9,6 +9,9 @@ import {
   Building2,
   Settings as SettingsIcon,
   LogOut,
+  UserPlus,
+  HeartHandshake,
+  Bell,
   LogOut as LogOutIcon, // Rename to avoid conflict if needed, but LogOut is fine
 } from 'lucide-react';
 import type { Page } from '../../types';
@@ -31,21 +34,21 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Thông tin thuê' },
       { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
       { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
+      { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Tin nhắn từ chủ trọ' },
     ];
   } else if (user?.role === 'ADMIN') {
     navItems = [
       { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Xem nhanh hoạt động' },
       { id: 'rooms', label: 'Phòng trọ', icon: <DoorOpen className="w-[18px] h-[18px]" />, description: 'Quản lý phòng' },
-      { id: 'tenants', label: 'Người thuê', icon: <Users className="w-[18px] h-[18px]" />, description: 'Thông tin thuê' },
+      { id: 'tenants', label: 'Khách thuê', icon: <Users className="w-[18px] h-[18px]" />, description: 'Đang thuê phòng' },
+      { id: 'user-management', label: 'Tài khoản', icon: <UserPlus className="w-[18px] h-[18px]" />, description: 'Cấp quyền truy cập' },
       { id: 'meter-readings', label: 'Điện nước', icon: <Zap className="w-[18px] h-[18px]" />, description: 'Chỉ số tiêu thụ' },
       { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
       { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
+      { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Gửi và phản hồi' },
     ];
   } else {
-    // GUEST
-    navItems = [
-      { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Trạng thái tài khoản' },
-    ];
+    navItems = [];
   }
 
   return (

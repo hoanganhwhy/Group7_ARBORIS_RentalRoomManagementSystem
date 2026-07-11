@@ -65,6 +65,12 @@ export function Rooms() {
     max_occupants: '' as string | number,
     status: 'available' as 'available' | 'occupied' | 'maintenance',
     description: '',
+    address: '',
+    distance_km: '' as string | number,
+    air_conditioner: false,
+    washing_machine: false,
+    furnished: false,
+    balcony: false,
   });
   const [assignData, setAssignData] = useState({
     tenant_id: '',
@@ -97,7 +103,7 @@ export function Rooms() {
 
   function openCreateModal() {
     setEditingRoom(null);
-    setFormData({ area: 'Khu A', room_number: '', floor: '', area_sqm: '', monthly_rent: '', max_occupants: '', status: 'available', description: '' });
+    setFormData({ area: 'Khu A', room_number: '', floor: '', area_sqm: '', monthly_rent: '', max_occupants: '', status: 'available', description: '', address: '', distance_km: '', air_conditioner: false, washing_machine: false, furnished: false, balcony: false });
     setIsModalOpen(true);
   }
 
@@ -112,6 +118,12 @@ export function Rooms() {
       max_occupants: room.max_occupants || 2,
       status: room.status,
       description: room.description || '',
+      address: room.address || '',
+      distance_km: room.distance_km ?? '',
+      air_conditioner: room.air_conditioner || false,
+      washing_machine: room.washing_machine || false,
+      furnished: room.furnished || false,
+      balcony: room.balcony || false,
     });
     setIsModalOpen(true);
   }
@@ -225,6 +237,7 @@ export function Rooms() {
         max_occupants: parseInt(formData.max_occupants as any) || 1,
         area_sqm: parseFloat(formData.area_sqm as any) || 0,
         monthly_rent: parseFloat(formData.monthly_rent as any) || 0,
+        distance_km: parseFloat(formData.distance_km as any) || 0,
       };
       if (editingRoom) {
         await updateRoom(editingRoom.id, payload);
@@ -740,6 +753,34 @@ export function Rooms() {
           </div>
           <Input label="Trạng thái" name="status" type="select" value={formData.status} onChange={(v) => setFormData({ ...formData, status: v as 'available' | 'occupied' | 'maintenance' })}
             options={[{ value: 'available', label: 'Trống' }, { value: 'occupied', label: 'Đang thuê' }, { value: 'maintenance', label: 'Bảo trì' }]} />
+          
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Địa chỉ cụ thể" name="address" type="text" value={formData.address} onChange={(v) => setFormData({ ...formData, address: v })} placeholder="VD: 123 Đường A, Quận B" />
+            <Input label="Khoảng cách đến ĐH (km)" name="distance_km" type="number" value={formData.distance_km} onChange={(v) => setFormData({ ...formData, distance_km: v })} min={0} step={0.1} />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-charcoal-700">Tiện ích AI tìm kiếm</label>
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-charcoal-700">
+                <input type="checkbox" checked={formData.air_conditioner} onChange={(e) => setFormData({ ...formData, air_conditioner: e.target.checked })} className="rounded text-terra-500 focus:ring-terra-500" />
+                Có Điều hòa
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-charcoal-700">
+                <input type="checkbox" checked={formData.washing_machine} onChange={(e) => setFormData({ ...formData, washing_machine: e.target.checked })} className="rounded text-terra-500 focus:ring-terra-500" />
+                Có Máy giặt
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-charcoal-700">
+                <input type="checkbox" checked={formData.furnished} onChange={(e) => setFormData({ ...formData, furnished: e.target.checked })} className="rounded text-terra-500 focus:ring-terra-500" />
+                Full Nội thất
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-charcoal-700">
+                <input type="checkbox" checked={formData.balcony} onChange={(e) => setFormData({ ...formData, balcony: e.target.checked })} className="rounded text-terra-500 focus:ring-terra-500" />
+                Có Ban công
+              </label>
+            </div>
+          </div>
+
           <Input label="Ghi chú" name="description" type="textarea" value={formData.description} onChange={(v) => setFormData({ ...formData, description: v })} placeholder="Mô tả thêm về phòng..." rows={2} />
           <div className="flex gap-3 pt-5 border-t border-charcoal-100">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Hủy</Button>
