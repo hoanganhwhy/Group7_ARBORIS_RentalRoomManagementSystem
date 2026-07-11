@@ -1,0 +1,36 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+.node-portable/
+.bolt/
+npm
+*.log
+
+# temporary patch scripts
+fix*.cjs
+fix*.py
+update*.cjs
+update*.py
+apply*.cjs
+apply*.py
+patch*.py
+recover*.py
+style*.py
+find*.cjs
+finalize.py
+undo.py
+center_meter.py
+convert_repairs_table.py
+remove_checkbox.py
+refactor*.cjs
+refactor*.py
+
+# local test/export files
+*.csv
+Tenants_recovery.tsx
+
+coverage/
+server/coverage/
+*.cjs
