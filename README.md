@@ -84,7 +84,7 @@ npm --prefix server install
 npm run dev:all
 ```
 Lệnh trên sẽ chạy song song cả client và server:
-* **Giao diện Client**: [http://localhost:5174](http://localhost:5174)
+* **Giao diện Client**: [http://localhost:5174](http://localhost:5173)
 * **Backend API**: [http://localhost:5000](http://localhost:5000)
 
 ---
