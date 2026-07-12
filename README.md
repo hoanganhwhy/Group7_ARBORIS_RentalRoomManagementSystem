@@ -97,10 +97,10 @@ npm --prefix server install
 npm run dev:all
 ```
 Lệnh trên sẽ chạy song song cả client và server:
-* **Giao diện Web**: [http://localhost:5174](http://localhost:5174)
+* **Giao diện Web**: [http://localhost:5173](http://localhost:5173)
 * **Backend API**: [http://localhost:5000](http://localhost:5000)
 
-*Lưu ý: Nếu port 5174 bị chiếm, Vite có thể tự nhảy sang 5175, hãy xem log Terminal.*
+*Lưu ý: Nếu port 5173 bị chiếm, Vite có thể tự nhảy sang 5174, hãy xem log Terminal.*
 
 ---
 
