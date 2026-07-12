@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Users, Phone, Mail, UserPlus, Key, Eye, EyeOff } from 'lucide-react';
+import { Users, Phone, Mail, UserPlus, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input, Spinner, EmptyState } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { getAdminUsers, createTenantUser } from '../lib/api';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
 
 export function UserManagement() {
   const [users, setUsers] = useState<any[]>([]);
@@ -13,6 +16,11 @@ export function UserManagement() {
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [pagination, setPagination] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
+
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -20,12 +28,22 @@ export function UserManagement() {
     phone: ''
   });
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, limit, searchQuery]);
+
+  // Reset trang khi thay đổi search
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery]);
 
   async function loadData() {
     try {
-      const usersData = await getAdminUsers();
-      setUsers(usersData);
+      setLoading(true);
+      const usersData = await getAdminUsers({ page, limit, search: searchQuery });
+      setUsers(usersData.data || []);
+      setPagination(usersData.pagination);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -88,8 +106,14 @@ export function UserManagement() {
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
-           <div className="px-6 py-4 border-b border-charcoal-100 bg-charcoal-50/50">
-            <h2 className="font-semibold text-charcoal-900">Tài khoản hiện có ({users.length})</h2>
+           <div className="px-6 py-4 border-b border-charcoal-100 bg-charcoal-50/50 flex justify-between items-center">
+            <h2 className="font-semibold text-charcoal-900">Tài khoản hiện có</h2>
+            <div className="flex gap-4 items-center">
+              <div className="w-64">
+                <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm tài khoản..." />
+              </div>
+              <PageSizeSelector limit={limit} onLimitChange={setLimit} />
+            </div>
           </div>
           <table className="w-full">
             <thead>
@@ -120,6 +144,17 @@ export function UserManagement() {
               ))}
             </tbody>
           </table>
+          
+          {/* Pagination component */}
+          {!loading && users.length > 0 && (
+            <Pagination
+              currentPage={page}
+              totalPages={pagination.totalPages}
+              hasNextPage={pagination.hasNextPage}
+              hasPreviousPage={pagination.hasPreviousPage}
+              onPageChange={setPage}
+            />
+          )}
         </div>
       )}
 
@@ -157,7 +192,7 @@ export function UserManagement() {
              <Input 
               label="Mật khẩu" 
               name="password" 
-              type={showPassword ? 'text' : 'password'}
+              type={(showPassword ? 'text' : 'password') as any}
               value={formData.password} 
               onChange={(v) => setFormData({ ...formData, password: v })} 
               required 

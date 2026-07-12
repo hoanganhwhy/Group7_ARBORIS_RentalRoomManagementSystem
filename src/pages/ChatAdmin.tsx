@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { getChatMessages, sendChatMessage, deleteChatMessage, getAdminUsers, getRooms } from '../lib/api';
 import { MessageCircle, Send, Trash2, Users, Search, MapPin } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { useSocket } from '../hooks/useSocket';
 
 export function ChatAdmin() {
   const [activeTab, setActiveTab] = useState<'group' | string>('group_ALL');
@@ -11,7 +12,9 @@ export function ChatAdmin() {
   const [tenants, setTenants] = useState<any[]>([]);
   const [areas, setAreas] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [tenantPage, setTenantPage] = useState(1);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const socket = useSocket();
 
   useEffect(() => {
     loadTenants();
@@ -20,11 +23,19 @@ export function ChatAdmin() {
 
   useEffect(() => {
     loadMessages();
-    const interval = setInterval(() => {
-      loadMessages(false);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [activeTab]);
+    
+    if (socket) {
+      const handleChatMessage = () => {
+        loadMessages(false);
+      };
+      
+      socket.on('chat_message', handleChatMessage);
+      return () => {
+        socket.off('chat_message', handleChatMessage);
+      };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, socket]);
 
   useEffect(() => {
     scrollToBottom();
@@ -36,7 +47,8 @@ export function ChatAdmin() {
 
   async function loadTenants() {
     try {
-      const usersData = await getAdminUsers();
+      const usersRes = await getAdminUsers({ limit: 10000 });
+      const usersData = usersRes.data || [];
       setTenants(usersData.filter((u: any) => u.role === 'TENANT' && u.tenant_id));
     } catch (error) {
       console.error(error);
@@ -45,7 +57,8 @@ export function ChatAdmin() {
 
   async function loadAreas() {
     try {
-      const roomsData = await getRooms();
+      const roomsRes = await getRooms({ limit: 1000 });
+      const roomsData = roomsRes.data || [];
       const uniqueAreas = Array.from(new Set(roomsData.map((r: any) => r.area).filter(Boolean))) as string[];
       setAreas(uniqueAreas);
     } catch (error) {
@@ -58,8 +71,8 @@ export function ChatAdmin() {
     try {
       const isGroup = activeTab.startsWith('group_');
       const receiverId = isGroup ? activeTab.replace('group_', '') : activeTab;
-      const data = await getChatMessages(isGroup, false, receiverId === 'ALL' ? undefined : receiverId);
-      setMessages(data);
+      const result = await getChatMessages(isGroup, false, receiverId === 'ALL' ? undefined : receiverId, { limit: 100 });
+      setMessages(result.data || []);
     } catch (error) {
       console.error(error);
     } finally {
@@ -91,10 +104,14 @@ export function ChatAdmin() {
     }
   }
 
+  const tenantsPerPage = 10;
   const filteredTenants = tenants.filter(t => 
     t.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    t.username?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    t.phone?.includes(searchTerm)
+  ).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+
+  const totalPages = Math.ceil(filteredTenants.length / tenantsPerPage);
+  const currentTenants = filteredTenants.slice((tenantPage - 1) * tenantsPerPage, tenantPage * tenantsPerPage);
 
   const activeTenant = tenants.find(t => t.tenant_id === activeTab);
 
@@ -110,7 +127,10 @@ export function ChatAdmin() {
               type="text" 
               placeholder="Tìm khách thuê..." 
               value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
+              onChange={e => {
+                setSearchTerm(e.target.value);
+                setTenantPage(1);
+              }}
               className="w-full pl-9 pr-4 py-2 rounded-xl border border-charcoal-200 bg-white focus:outline-none focus:ring-2 focus:ring-terra-500 text-sm"
             />
           </div>
@@ -146,15 +166,15 @@ export function ChatAdmin() {
             </button>
           ))}
 
-          <div className="pt-4 pb-2 px-3 text-xs font-semibold text-charcoal-400 uppercase tracking-wider">Khách Thuê (1-1)</div>
+          <div className="pt-4 pb-2 px-3 text-xs font-semibold text-charcoal-400 uppercase tracking-wider">Khách Thuê (1-1) - {filteredTenants.length}</div>
           
-          {filteredTenants.map(t => (
+          {currentTenants.map(t => (
             <button 
               key={t.tenant_id}
               onClick={() => setActiveTab(t.tenant_id)}
               className={`w-full text-left px-3 py-2 rounded-xl flex items-center gap-3 transition-colors ${activeTab === t.tenant_id ? 'bg-terra-100 text-terra-700 font-medium' : 'hover:bg-charcoal-100/50 text-charcoal-700'}`}
             >
-              <div className="w-10 h-10 rounded-full bg-terra-50 text-terra-600 flex items-center justify-center font-bold border border-terra-100">
+              <div className="w-10 h-10 rounded-full bg-terra-50 text-terra-600 flex items-center justify-center font-bold border border-terra-100 flex-shrink-0">
                 {t.full_name?.charAt(0) || 'U'}
               </div>
               <div className="flex-1 truncate">
@@ -163,6 +183,26 @@ export function ChatAdmin() {
               </div>
             </button>
           ))}
+
+          {totalPages > 1 && (
+            <div className="flex justify-between items-center px-4 py-2 mt-2 border-t border-charcoal-100/50">
+              <button 
+                onClick={() => setTenantPage(p => Math.max(1, p - 1))}
+                disabled={tenantPage === 1}
+                className="text-xs font-medium text-terra-600 disabled:opacity-30 p-1"
+              >
+                Trước
+              </button>
+              <span className="text-[10px] text-charcoal-500">Trang {tenantPage}/{totalPages}</span>
+              <button 
+                onClick={() => setTenantPage(p => Math.min(totalPages, p + 1))}
+                disabled={tenantPage === totalPages}
+                className="text-xs font-medium text-terra-600 disabled:opacity-30 p-1"
+              >
+                Sau
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -201,23 +241,27 @@ export function ChatAdmin() {
                     {!isMine && activeTab.startsWith('group_') && (
                       <div className="text-xs text-charcoal-500 mb-1 ml-1">{msg.sender_name || 'Khách'}</div>
                     )}
-                    <div className={`relative px-4 py-2.5 rounded-2xl ${isMine ? 'bg-terra-500 text-white rounded-tr-sm' : 'bg-charcoal-100 text-charcoal-900 rounded-tl-sm'}`}>
-                      <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{msg.content}</p>
-                      <div className={`text-[10px] mt-1.5 flex items-center justify-between gap-2 ${isMine ? 'text-terra-100' : 'text-charcoal-400'}`}>
+                    <div className={`relative px-4 py-2.5 rounded-2xl ${isMine ? 'bg-terra-500 text-white rounded-tr-sm' : 'bg-charcoal-100 text-charcoal-900 rounded-tl-sm'} ${msg.is_deleted ? 'opacity-70 bg-opacity-50' : ''}`}>
+                      <p className="whitespace-pre-wrap text-[15px] leading-relaxed">
+                        {msg.is_deleted ? <span className="italic">Tin nhắn đã thu hồi</span> : msg.content}
+                      </p>
+                      <div className={`text-[10px] mt-1.5 flex flex-wrap items-center justify-between gap-2 ${isMine ? 'text-terra-100' : 'text-charcoal-400'}`}>
                         <span>{new Date(msg.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
-                        {isMine && (
+                        {isMine && !msg.is_deleted && (
                           <span className="font-medium opacity-90">
-                            {activeTab.startsWith('group_') ? 'Đã gửi' : (msg.is_read ? 'Đã xem' : 'Đã gửi')}
+                            {activeTab === 'group_ALL' || activeTab.startsWith('group_area_') ? 'Đã gửi' : (msg.is_read ? 'Đã xem' : 'Đã gửi')}
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
-                  <div className={`flex items-center opacity-0 group-hover:opacity-100 transition-opacity ${isMine ? 'order-1 pr-2' : 'order-2 pl-2'}`}>
-                    <button onClick={() => handleDelete(msg.id)} className="p-1.5 text-charcoal-400 hover:text-red-500 rounded-full hover:bg-red-50" title="Xóa">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {!msg.is_deleted && (
+                    <div className={`flex items-center opacity-0 group-hover:opacity-100 transition-opacity ${isMine ? 'order-1 pr-2' : 'order-2 pl-2'}`}>
+                      <button onClick={() => handleDelete(msg.id)} className="p-1.5 text-charcoal-400 hover:text-red-500 rounded-full hover:bg-red-50" title="Xóa">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })

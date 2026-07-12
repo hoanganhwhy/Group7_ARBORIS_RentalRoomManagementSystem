@@ -21,6 +21,7 @@
     "node-cron": "^4.6.0",
     "nodemailer": "^9.0.3",
     "pdfkit": "^0.19.1",
+    "socket.io": "^4.8.3",
     "sqlite3": "^5.1.7",
     "vite-react-typescript-starter": "file:.."
   },

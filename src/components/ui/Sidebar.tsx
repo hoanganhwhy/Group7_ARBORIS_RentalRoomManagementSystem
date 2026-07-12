@@ -18,6 +18,9 @@ import {
 import type { Page } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { ProfileModal } from './ProfileModal';
+import { getBadges } from '../../lib/api';
+import { useSocket } from '../../hooks/useSocket';
+import { useEffect } from 'react';
 
 interface SidebarProps {
   currentPage: Page;
@@ -27,16 +30,49 @@ interface SidebarProps {
 export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   const { user, logout } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [badges, setBadges] = useState({ chat: 0, notifications: 0, invoices: 0, repairs: 0 });
+  const socket = useSocket();
+
+  useEffect(() => {
+    if (user) {
+      loadBadges();
+      const interval = setInterval(() => {
+        loadBadges();
+      }, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (socket) {
+      const handleUpdate = () => loadBadges();
+      socket.on('chat_message', handleUpdate);
+      socket.on('notification', handleUpdate);
+      return () => {
+        socket.off('chat_message', handleUpdate);
+        socket.off('notification', handleUpdate);
+      };
+    }
+  }, [socket]);
+
+  const loadBadges = async () => {
+    try {
+      const data = await getBadges();
+      setBadges(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
   
-  let navItems: { id: Page; label: string; icon: React.ReactNode; description: string }[] = [];
+  let navItems: { id: Page; label: string; icon: React.ReactNode; description: string; badge?: number }[] = [];
   
   if (user?.role === 'TENANT') {
     navItems = [
       { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Thông tin thuê' },
-      { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
-      { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
-      { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Tin nhắn từ chủ trọ' },
-      { id: 'chat', label: 'Tin nhắn', icon: <MessageCircle className="w-[18px] h-[18px]" />, description: 'Chat với chủ nhà' },
+      { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán', badge: badges.invoices },
+      { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì', badge: badges.repairs },
+      { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Tin nhắn từ chủ trọ', badge: badges.notifications },
+      { id: 'chat', label: 'Tin nhắn', icon: <MessageCircle className="w-[18px] h-[18px]" />, description: 'Chat với chủ nhà', badge: badges.chat },
     ];
   } else if (user?.role === 'ADMIN') {
     navItems = [
@@ -45,10 +81,10 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       { id: 'tenants', label: 'Khách thuê', icon: <Users className="w-[18px] h-[18px]" />, description: 'Đang thuê phòng' },
       { id: 'user-management', label: 'Tài khoản', icon: <UserPlus className="w-[18px] h-[18px]" />, description: 'Cấp quyền truy cập' },
       { id: 'meter-readings', label: 'Điện nước', icon: <Zap className="w-[18px] h-[18px]" />, description: 'Chỉ số tiêu thụ' },
-      { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán' },
-      { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì' },
-      { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Gửi và phản hồi' },
-      { id: 'chat', label: 'Tin nhắn', icon: <MessageCircle className="w-[18px] h-[18px]" />, description: 'Nhắn tin' },
+      { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán', badge: badges.invoices },
+      { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì', badge: badges.repairs },
+      { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Gửi và phản hồi', badge: badges.notifications },
+      { id: 'chat', label: 'Tin nhắn', icon: <MessageCircle className="w-[18px] h-[18px]" />, description: 'Nhắn tin', badge: badges.chat },
     ];
   } else {
     navItems = [];
@@ -84,12 +120,17 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
                     : 'hover:bg-cream-50'
                 }`}
               >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+                <div className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
                   isActive
                     ? 'bg-terra-500 text-white shadow-soft'
                     : 'bg-charcoal-50 text-charcoal-400'
                 }`}>
                   {item.icon}
+                  {item.badge ? (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white">
+                      {item.badge > 99 ? '99+' : item.badge}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="flex-1 text-left">
                   <span className={`block text-sm font-medium ${isActive ? 'text-terra-700' : 'text-charcoal-600'}`}>

@@ -22,16 +22,17 @@ import {
   updateRepairRequest,
   deleteRepairRequest,
   getRooms,
-  getTenants,
 } from '../lib/api';
-import type { RepairRequest, Room, Tenant } from '../types';
+
+import type { RepairRequest, Room } from '../types';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
 
 export function Repairs() {
   const { user } = useAuth();
   const isTenant = user?.role === 'TENANT';
-  const [repairs, setRepairs] = useState<RepairRequest[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -39,12 +40,19 @@ export function Repairs() {
   const [editingRepair, setEditingRepair] = useState<RepairRequest | null>(null);
   const [viewingRepair, setViewingRepair] = useState<RepairRequest | null>(null);
   const [deletingRepair, setDeletingRepair] = useState<RepairRequest | null>(null);
-  const [filter, setFilter] = useState<'new' | 'in_progress' | 'resolved' | 'closed'>('new');
+  const [filter, setFilter] = useState<'all' | 'new' | 'in_progress' | 'resolved' | 'closed'>('new');
   const [filterMonth, setFilterMonth] = useState<number>(0);
   const [filterYear, setFilterYear] = useState<number>(0);
   const [filterFloor, setFilterFloor] = useState<string>('all');
   const [filterArea, setFilterArea] = useState<string>('all');
   const [filterDate, setFilterDate] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+
+  // Add state for all repairs to compute summary
+  const [allRepairs, setAllRepairs] = useState<RepairRequest[]>([]);
 
   const [formData, setFormData] = useState({
     room_id: '',
@@ -59,16 +67,33 @@ export function Repairs() {
 
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { loadData(); }, []);
+  // loadData uses the dependencies listed below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadData(); }, [page, limit, filter, filterMonth, filterYear, filterFloor, filterArea, filterDate, searchQuery]);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [filter, filterMonth, filterYear, filterFloor, filterArea, filterDate, searchQuery]);
 
   async function loadData() {
     try {
-      const [repairsData, roomsData, tenantsData] = await Promise.all([
-        getRepairRequests(), getRooms(), getTenants(),
+      setLoading(true);
+      const [repairsData, allRepairsData, roomsData] = await Promise.all([
+        getRepairRequests({
+          page,
+          limit,
+          search: searchQuery,
+          status: filter !== 'all' ? filter : undefined,
+          month: filterMonth > 0 ? filterMonth.toString() : undefined,
+          year: filterYear > 0 ? filterYear.toString() : undefined,
+          floor: filterFloor !== 'all' ? filterFloor : undefined,
+          area: filterArea !== 'all' ? filterArea : undefined,
+          date: filterDate || undefined,
+        } as any),
+        getRepairRequests({ limit: 10000 }),
+        getRooms({ limit: 100 }),
       ]);
-      setRepairs(repairsData);
-      setRooms(roomsData);
-      setTenants(tenantsData);
+      setAllRepairs(allRepairsData.data || []);
+      setRooms(roomsData.data || []);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -152,7 +177,7 @@ export function Repairs() {
       await deleteRepairRequest(deletingRepair.id);
       await loadData();
       setIsDeleteModalOpen(false);
-    } catch (error) {
+    } catch {
       alert('Không thể xóa yêu cầu.');
     }
   }
@@ -168,28 +193,80 @@ export function Repairs() {
       if (viewingRepair?.id === repair.id) {
         setIsDetailModalOpen(false);
       }
-    } catch (error) {
+    } catch {
       alert('Không thể cập nhật trạng thái.');
     }
   }
 
   const userRepairs = isTenant
-    ? repairs.filter(r => r.tenant_id === user?.tenant_id)
-    : repairs;
+    ? allRepairs.filter(
+        (repair) => String(repair.tenant_id) === String(user?.tenant_id)
+      )
+    : allRepairs;
 
-  const filteredRepairs = userRepairs.filter((repair) => {
-    const matchesStatus = repair.status === filter;
-    
-    // Parse reported_at date
-    const d = new Date(repair.reported_at);
-    const matchesYear = filterYear === 0 || d.getFullYear() === filterYear;
-    const matchesMonth = filterMonth === 0 || (d.getMonth() + 1) === filterMonth;
-    const matchesFloor = filterFloor === 'all' || (repair.room && repair.room.floor.toString() === filterFloor);
-    const matchesArea = filterArea === 'all' || (repair.room && repair.room.area === filterArea);
-    const matchesDate = !filterDate || repair.reported_at.startsWith(filterDate);
+  // The status counters and visible list must use the same data source.
+  // This avoids a case where the tab shows a count but the list is empty.
+  const matchingRepairs = userRepairs.filter((repair) => {
+    const reportedDate = repair.reported_at
+      ? new Date(repair.reported_at)
+      : null;
+    const query = searchQuery.trim().toLowerCase();
 
-    return matchesStatus && matchesYear && matchesMonth && matchesFloor && matchesArea && matchesDate;
+    const matchesStatus =
+      filter === 'all' || repair.status === filter;
+
+    const matchesSearch =
+      !query ||
+      repair.title?.toLowerCase().includes(query) ||
+      repair.description?.toLowerCase().includes(query) ||
+      repair.room?.room_number?.toLowerCase().includes(query) ||
+      repair.room?.area?.toLowerCase().includes(query) ||
+      repair.tenant?.full_name?.toLowerCase().includes(query);
+
+    const matchesMonth =
+      filterMonth === 0 ||
+      (reportedDate !== null &&
+        !Number.isNaN(reportedDate.getTime()) &&
+        reportedDate.getMonth() + 1 === filterMonth);
+
+    const matchesYear =
+      filterYear === 0 ||
+      (reportedDate !== null &&
+        !Number.isNaN(reportedDate.getTime()) &&
+        reportedDate.getFullYear() === filterYear);
+
+    const matchesArea =
+      filterArea === 'all' ||
+      repair.room?.area === filterArea;
+
+    const matchesFloor =
+      filterFloor === 'all' ||
+      String(repair.room?.floor ?? '') === filterFloor;
+
+    const matchesDate =
+      !filterDate ||
+      repair.reported_at?.slice(0, 10) === filterDate;
+
+    return (
+      matchesStatus &&
+      matchesSearch &&
+      matchesMonth &&
+      matchesYear &&
+      matchesArea &&
+      matchesFloor &&
+      matchesDate
+    );
   });
+
+  const localTotalPages = Math.max(
+    1,
+    Math.ceil(matchingRepairs.length / limit)
+  );
+
+  const filteredRepairs = matchingRepairs.slice(
+    (page - 1) * limit,
+    page * limit
+  );
 
   const statusCounts = {
     new: userRepairs.filter((r) => r.status === 'new').length,
@@ -295,6 +372,10 @@ export function Repairs() {
               <option key={y} value={y}>{y}</option>
             ))}
           </select>
+          <div className="w-64 ml-auto">
+            <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm yêu cầu..." />
+          </div>
+          <PageSizeSelector limit={limit} onLimitChange={setLimit} />
         </div>
       </section>
 
@@ -318,6 +399,19 @@ export function Repairs() {
               onStatusChange={handleStatusChange}
             />
           ))}
+          
+          {/* Pagination component */}
+          {!loading && filteredRepairs.length > 0 && (
+            <div className="mt-4">
+              <Pagination
+                currentPage={page}
+                totalPages={localTotalPages}
+                hasNextPage={page < localTotalPages}
+                hasPreviousPage={page > 1}
+                onPageChange={setPage}
+              />
+            </div>
+          )}
         </div>
       )}
 

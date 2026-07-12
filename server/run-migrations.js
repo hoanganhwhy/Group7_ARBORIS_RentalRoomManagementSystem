@@ -186,6 +186,36 @@ async function runMigrations() {
           await run(stmt);
         }
       }
+    },
+    {
+      version: '008_friend_requests',
+      up: async () => {
+        const script = fs.readFileSync(join(__dirname, 'migrations', '008_friend_requests.sql'), 'utf-8');
+        const statements = script.split(';').map(s => s.trim()).filter(s => s.length > 0);
+        for (let stmt of statements) {
+          await run(stmt);
+        }
+      }
+    },
+    {
+      version: '009_notification_refactor',
+      up: async () => {
+        const script = fs.readFileSync(join(__dirname, 'migrations', '009_notification_refactor.sql'), 'utf-8');
+        const statements = script.split(';').map(s => s.trim()).filter(s => s.length > 0);
+        for (let stmt of statements) {
+          await run(stmt);
+        }
+      }
+    },
+    {
+      version: '010_notification_admin_read',
+      up: async () => {
+        const script = fs.readFileSync(join(__dirname, 'migrations', '010_notification_admin_read.sql'), 'utf-8');
+        const statements = script.split(';').map(s => s.trim()).filter(s => s.length > 0);
+        for (let stmt of statements) {
+          await run(stmt);
+        }
+      }
     }
   ];
 

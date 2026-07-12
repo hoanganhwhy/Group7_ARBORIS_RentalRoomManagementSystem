@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { getNotifications, getNotificationDetail, replyNotification, markNotificationAsRead } from '../lib/api';
+import { getNotificationDetail, replyNotification, markNotificationAsRead } from '../lib/api';
 import { Bell, Send, CheckCircle2, Circle } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
 
-export default function NotificationsTenant() {
+import { Page } from '../types';
+
+export default function NotificationsTenant({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'main' | 'archive'>('main');
@@ -14,6 +17,10 @@ export default function NotificationsTenant() {
   const [detailNotif, setDetailNotif] = useState<any>(null);
   const [replies, setReplies] = useState<any[]>([]);
   const [replyContent, setReplyContent] = useState('');
+
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [paginationInfo, setPaginationInfo] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
 
   useEffect(() => {
     loadNotifications();
@@ -24,17 +31,22 @@ export default function NotificationsTenant() {
     }, 10000);
     
     return () => clearInterval(interval);
-  }, [viewMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, page, limit]);
 
   async function loadNotifications(showLoading = true) {
     if (showLoading) setLoading(true);
     try {
       const isArchive = viewMode === 'archive';
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}&page=${page}&limit=${limit}`, {
+        credentials: 'include'
       });
       if(res.ok) {
-         setNotifications(await res.json());
+        const result = await res.json();
+        setNotifications(result.data || []);
+        if (result.pagination) {
+          setPaginationInfo(result.pagination);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -49,6 +61,12 @@ export default function NotificationsTenant() {
         await markNotificationAsRead(n.id);
         // Optimistically mark as read
         setNotifications(prev => prev.map(notif => notif.id === n.id ? {...notif, is_read: 1} : notif));
+      }
+
+      if (n.action_url && onNavigate) {
+        const targetPage = n.action_url.replace('/', '') as Page;
+        onNavigate(targetPage);
+        return; // Do not open detail modal if it's a navigational notification
       }
 
       const detail = await getNotificationDetail(n.id);
@@ -78,10 +96,10 @@ export default function NotificationsTenant() {
     try {
       await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        credentials: 'include'
       });
       loadNotifications();
-    } catch (error) {
+    } catch {
       alert('Lỗi khi xóa');
     }
   }
@@ -91,10 +109,10 @@ export default function NotificationsTenant() {
     try {
       await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}/restore`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        credentials: 'include'
       });
       loadNotifications();
-    } catch (error) {
+    } catch {
       alert('Lỗi khi khôi phục');
     }
   }
@@ -127,6 +145,9 @@ export default function NotificationsTenant() {
             Lưu trữ (30 ngày)
             {viewMode === 'archive' && <span className="absolute bottom-0 left-0 w-full h-0.5 bg-terra-500 rounded-t-full"></span>}
           </button>
+        </div>
+        <div className="flex items-center gap-3 px-6 py-3 border-b border-charcoal-100">
+          <PageSizeSelector limit={limit} onLimitChange={(newLimit) => { setLimit(newLimit); setPage(1); }} />
         </div>
         {loading ? (
           <p className="text-charcoal-500 p-6 text-center">Đang tải thông báo...</p>
@@ -180,6 +201,19 @@ export default function NotificationsTenant() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {!loading && notifications.length > 0 && (
+          <div className="p-4 border-t border-charcoal-100">
+            <Pagination
+              currentPage={page}
+              totalPages={paginationInfo.totalPages}
+              hasNextPage={paginationInfo.hasNextPage}
+              hasPreviousPage={paginationInfo.hasPreviousPage}
+              onPageChange={setPage}
+            />
           </div>
         )}
       </div>

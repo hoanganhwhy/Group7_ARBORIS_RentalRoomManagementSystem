@@ -18,7 +18,11 @@ import {
   getRooms,
   getLatestMeterReading,
 } from '../lib/api';
+
 import type { MeterReading, Room } from '../types';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
 
 export function MeterReadings() {
   const [readings, setReadings] = useState<MeterReading[]>([]);
@@ -44,19 +48,39 @@ export function MeterReadings() {
   const [loadingPrevious, setLoadingPrevious] = useState(false);
   const [filterMonth, setFilterMonth] = useState<number>(0);
   const [filterYear, setFilterYear] = useState<number>(0);
+  const [searchQuery, setSearchQuery] = useState('');
 
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
+
+  // loadData uses the dependencies listed below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [page, limit, filterMonth, filterYear, searchQuery]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filterMonth, filterYear, searchQuery]);
 
   async function loadData() {
     try {
+      setLoading(true);
       const [readingsData, roomsData] = await Promise.all([
-        getMeterReadings(),
-        getRooms(),
+        getMeterReadings({ 
+          page, 
+          limit, 
+          search: searchQuery,
+          month: filterMonth > 0 ? filterMonth.toString() : undefined,
+          year: filterYear > 0 ? filterYear.toString() : undefined
+        } as any),
+        getRooms({ limit: 100 }), // Fetch enough rooms for the dropdown
       ]);
-      setReadings(readingsData);
-      setRooms(roomsData.filter((r) => r.status === 'occupied'));
+      setReadings(readingsData.data || []);
+      setPagination(readingsData.pagination);
+      setRooms((roomsData.data || []).filter((r: Room) => r.status === 'occupied'));
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -200,12 +224,7 @@ export function MeterReadings() {
   const electricityCost = electricityUsage * elecPrice;
   const waterCost = waterUsage * watPrice;
 
-  const filteredReadings = readings.filter((r) => {
-    const d = new Date(r.reading_date);
-    const matchesMonth = filterMonth === 0 || (d.getMonth() + 1) === filterMonth;
-    const matchesYear = filterYear === 0 || d.getFullYear() === filterYear;
-    return matchesMonth && matchesYear;
-  });
+  const filteredReadings = readings; // Filtering is now handled by backend
 
   if (loading) return <Spinner />;
 
@@ -224,19 +243,25 @@ export function MeterReadings() {
       </header>
 
       {/* Filters */}
-      <section className="flex gap-4">
-        <select value={filterMonth} onChange={(e) => setFilterMonth(Number(e.target.value))} className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-40">
-          <option value={0}>Tất cả tháng</option>
-          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-            <option key={m} value={m}>Tháng {m}</option>
-          ))}
-        </select>
-        <select value={filterYear} onChange={(e) => setFilterYear(Number(e.target.value))} className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-40">
-          <option value={0}>Tất cả năm</option>
-          {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i).map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
+      <section className="flex gap-4 items-center justify-between">
+        <div className="flex gap-4">
+          <select value={filterMonth} onChange={(e) => setFilterMonth(Number(e.target.value))} className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-40">
+            <option value={0}>Tất cả tháng</option>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+              <option key={m} value={m}>Tháng {m}</option>
+            ))}
+          </select>
+          <select value={filterYear} onChange={(e) => setFilterYear(Number(e.target.value))} className="px-3 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-40">
+            <option value={0}>Tất cả năm</option>
+            {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          <div className="w-64">
+            <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm theo số phòng..." />
+          </div>
+        </div>
+        <PageSizeSelector limit={limit} onLimitChange={setLimit} />
       </section>
 
       {filteredReadings.length === 0 ? (
@@ -351,6 +376,17 @@ export function MeterReadings() {
               </tbody>
             </table>
           </div>
+          
+          {/* Pagination component */}
+          {!loading && filteredReadings.length > 0 && (
+            <Pagination
+              currentPage={page}
+              totalPages={pagination.totalPages}
+              hasNextPage={pagination.hasNextPage}
+              hasPreviousPage={pagination.hasPreviousPage}
+              onPageChange={setPage}
+            />
+          )}
         </div>
       )}
 
@@ -413,7 +449,7 @@ export function MeterReadings() {
                 type="number"
                 value={formData.electricity_new}
                 onChange={(v) => setFormData({ ...formData, electricity_new: v })}
-                min={formData.electricity_old}
+                min={Number(formData.electricity_old) || 0}
                 required
               />
               <Input
@@ -462,7 +498,7 @@ export function MeterReadings() {
                 type="number"
                 value={formData.water_new}
                 onChange={(v) => setFormData({ ...formData, water_new: v })}
-                min={formData.water_old}
+                min={Number(formData.water_old) || 0}
                 required
               />
               <Input

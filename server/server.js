@@ -1,6 +1,8 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 
 dotenv.config({ path: path.join(process.cwd(), '.env') });
 
@@ -17,7 +19,21 @@ import { setupInvoices } from './invoices.js';
 import aiRoutes from './src/routes/ai.routes.js';
 
 const app = express();
+const server = http.createServer(app);
 const port = process.env.PORT || 5000;
+
+// Setup Socket.io
+const io = new SocketIOServer(server, {
+  cors: { origin: true, credentials: true }
+});
+app.set('io', io);
+
+io.on('connection', (socket) => {
+  console.log('New client connected:', socket.id);
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
 
 // Enable trust proxy because of Cloudflare Tunnel / Ngrok
 app.set('trust proxy', 1);
@@ -209,6 +225,50 @@ export async function generatePrefixedIdDB(tableName, prefix) {
   return `${prefix}${String(nextNum).padStart(5, '0')}`;
 }
 
+// ----------------- NOTIFICATION HELPER -----------------
+export async function createNotification(io, { sender_id, target_type, target_tenant_id, notification_type, title, content, reference_id, action_url }) {
+  try {
+    const result = await run(`
+      INSERT INTO notifications (sender_id, title, content, target_type, target_tenant_id, notification_type, reference_id, action_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [sender_id, title, content, target_type, target_tenant_id, notification_type || 'general', reference_id || null, action_url || null]);
+    
+    const notification_id = result.lastID;
+    
+    if (target_type === 'INDIVIDUAL' && target_tenant_id) {
+      await run(`INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)`, [notification_id, target_tenant_id]);
+    } else if (target_type === 'ALL') {
+      const tenants = await query('SELECT id FROM khach_thue WHERE trang_thai = "active" OR trang_thai = "ending"');
+      for (const t of tenants) {
+        await run(`INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)`, [notification_id, t.id]);
+      }
+    } else if (target_type === 'AREA') {
+      const tenants = await query(`
+        SELECT k.id 
+        FROM khach_thue k
+        JOIN hop_dong_thue hd ON k.id = hd.khach_thue_id
+        JOIN phong p ON hd.phong_id = p.id
+        JOIN nha_tro nt ON p.nha_tro_id = nt.id
+        WHERE nt.ten_nha_tro = ? AND (k.trang_thai = "active" OR k.trang_thai = "ending")
+      `, [target_tenant_id]);
+      for (const t of tenants) {
+        await run(`INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)`, [notification_id, t.id]);
+      }
+    }
+
+    if (io) {
+      io.emit('notification', { 
+        id: notification_id, 
+        target_type, 
+        target_tenant_id,
+        notification_type
+      });
+    }
+  } catch (error) {
+    console.error('Error creating notification:', error);
+  }
+}
+
 // ----------------- SCHEMA MAPPERS (Vietnamese DB -> English API) -----------------
 const mapRoom = (r) => {
   if (!r) return null;
@@ -390,11 +450,60 @@ app.put('/api/auth/me', authenticate, async (req, res) => {
   }
 });
 
+const getPaginationParams = (req) => {
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 100);
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+};
+
 // ----------------- DASHBOARD API -----------------
 // ----------------- ROOMS API -----------------
 app.get('/api/rooms', async (req, res) => {
   try {
-    const rooms = await query('SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id ORDER BY p.so_phong');
+    const { page, limit, offset } = getPaginationParams(req);
+    const { search, sortBy, sortOrder, status, area, floor } = req.query;
+
+    let whereClause = 'WHERE 1=1';
+    const params = [];
+
+    if (search) {
+      whereClause += ' AND (p.so_phong LIKE ? OR n.dia_chi LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    if (status && status !== 'all') {
+      whereClause += ' AND p.trang_thai = ?';
+      params.push(status);
+    }
+    
+    if (area && area !== 'all') {
+      whereClause += ' AND n.ten_nha_tro = ?';
+      params.push(area);
+    }
+    
+    if (floor && floor !== 'all') {
+      whereClause += ' AND p.tang = ?';
+      params.push(floor);
+    }
+
+    const sortField = sortBy || 'p.so_phong';
+    const order = sortOrder === 'desc' ? 'DESC' : 'ASC';
+
+    // Verify sortField to prevent SQL Injection
+    const allowedSortFields = ['p.so_phong', 'p.gia_phong', 'p.dien_tich', 'p.ngay_tao'];
+    const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'p.so_phong';
+
+    const countResult = await queryOne(`SELECT COUNT(*) as total FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id ${whereClause}`, params);
+    const totalItems = countResult.total;
+
+    const rooms = await query(`
+      SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi 
+      FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id 
+      ${whereClause}
+      ORDER BY ${safeSortField} ${order}
+      LIMIT ? OFFSET ?
+    `, [...params, limit, offset]);
     
     // Fetch all active assignments for mapping
     const assignments = await query(`
@@ -447,7 +556,17 @@ app.get('/api/rooms', async (req, res) => {
       };
     });
 
-    res.json(mappedRooms);
+    res.json({
+      data: mappedRooms,
+      pagination: {
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+        hasNextPage: page * limit < totalItems,
+        hasPreviousPage: page > 1
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message });
@@ -627,8 +746,40 @@ app.delete('/api/rooms/:id', async (req, res) => {
 // ----------------- USERS API -----------------
 app.get('/api/admin/users', authenticate, checkRole('ADMIN'), async (req, res) => {
   try {
-    const users = await query("SELECT id, username, email, phone, full_name, role, tenant_id, created_at FROM users WHERE role != 'ADMIN' ORDER BY created_at DESC");
-    res.json(users);
+    const { page, limit, offset } = getPaginationParams(req);
+    const { search, sortBy, sortOrder } = req.query;
+
+    let whereClause = "WHERE role != 'ADMIN'";
+    const params = [];
+
+    if (search) {
+      whereClause += ' AND (username LIKE ? OR email LIKE ? OR phone LIKE ? OR full_name LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    const sortField = sortBy || 'created_at';
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const allowedSortFields = ['username', 'email', 'phone', 'full_name', 'created_at'];
+    const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'created_at';
+
+    const countResult = await queryOne(`SELECT COUNT(*) as total FROM users ${whereClause}`, params);
+    const totalItems = countResult.total;
+
+    const users = await query(`
+      SELECT id, username, email, phone, full_name, role, tenant_id, created_at 
+      FROM users 
+      ${whereClause} 
+      ORDER BY ${safeSortField} ${order} 
+      LIMIT ? OFFSET ?
+    `, [...params, limit, offset]);
+
+    res.json({
+      data: users,
+      pagination: {
+        page, limit, totalItems, totalPages: Math.ceil(totalItems/limit),
+        hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -680,8 +831,34 @@ app.post('/api/admin/users', authenticate, checkRole('ADMIN'), async (req, res) 
 // ----------------- TENANTS API -----------------
 app.get('/api/tenants', async (req, res) => {
   try {
-    const tenants = await query('SELECT * FROM khach_thue ORDER BY ho_ten');
-    res.json(tenants.map(mapTenant));
+    const { page, limit, offset } = getPaginationParams(req);
+    const { search, sortBy, sortOrder } = req.query;
+
+    let whereClause = '';
+    const params = [];
+
+    if (search) {
+      whereClause = 'WHERE ho_ten LIKE ? OR so_dien_thoai LIKE ? OR so_cccd LIKE ?';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    const sortField = sortBy || 'ho_ten';
+    const order = sortOrder === 'desc' ? 'DESC' : 'ASC';
+    const allowedSortFields = ['ho_ten', 'so_dien_thoai', 'so_cccd'];
+    const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'ho_ten';
+
+    const countResult = await queryOne(`SELECT COUNT(*) as total FROM khach_thue ${whereClause}`, params);
+    const totalItems = countResult.total;
+
+    const tenants = await query(`SELECT * FROM khach_thue ${whereClause} ORDER BY ${safeSortField} ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]);
+    
+    res.json({
+      data: tenants.map(mapTenant),
+      pagination: {
+        page, limit, totalItems, totalPages: Math.ceil(totalItems/limit),
+        hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -932,12 +1109,44 @@ app.get('/api/room_assignments/expiring', async (req, res) => {
 // ----------------- METER READINGS API -----------------
 app.get('/api/meter_readings', async (req, res) => {
   try {
+    const { page, limit, offset } = getPaginationParams(req);
+    const { search, sortBy, sortOrder, month, year } = req.query;
+
+    let whereClause = 'WHERE 1=1';
+    const params = [];
+
+    if (search) {
+      whereClause += ' AND r.so_phong LIKE ?';
+      params.push(`%${search}%`);
+    }
+
+    if (month && month !== '0') {
+      const monthStr = month.padStart(2, '0');
+      whereClause += " AND strftime('%m', mr.ngay_ghi_so) = ?";
+      params.push(monthStr);
+    }
+
+    if (year && year !== '0') {
+      whereClause += " AND strftime('%Y', mr.ngay_ghi_so) = ?";
+      params.push(year.toString());
+    }
+
+    const sortField = sortBy || 'mr.ngay_ghi_so';
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const allowedSortFields = ['mr.ngay_ghi_so', 'r.so_phong'];
+    const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'mr.ngay_ghi_so';
+
+    const countResult = await queryOne(`SELECT COUNT(*) as total FROM chi_so_dien_nuoc mr JOIN phong r ON mr.phong_id = r.id ${whereClause}`, params);
+    const totalItems = countResult.total;
+
     const data = await query(`
       SELECT mr.*, r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da
       FROM chi_so_dien_nuoc mr
       JOIN phong r ON mr.phong_id = r.id
-      ORDER BY mr.ngay_ghi_so DESC
-    `);
+      ${whereClause}
+      ORDER BY ${safeSortField} ${order}
+      LIMIT ? OFFSET ?
+    `, [...params, limit, offset]);
 
     const mapped = data.map(item => ({
       ...mapReading(item),
@@ -953,7 +1162,13 @@ app.get('/api/meter_readings', async (req, res) => {
       }
     }));
 
-    res.json(mapped);
+    res.json({
+      data: mapped,
+      pagination: {
+        page, limit, totalItems, totalPages: Math.ceil(totalItems/limit),
+        hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1067,6 +1282,56 @@ app.delete('/api/meter_readings/:id', async (req, res) => {
 // ----------------- INVOICES API -----------------
 app.get('/api/invoices', async (req, res) => {
   try {
+    const { page, limit, offset } = getPaginationParams(req);
+    const { search, sortBy, sortOrder, status, month, year, floor, area, date } = req.query;
+
+    let whereClause = 'WHERE 1=1';
+    const params = [];
+
+    if (search) {
+      whereClause += ' AND (r.so_phong LIKE ? OR t.ho_ten LIKE ? OR i.ma_hoa_don LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (status && status !== 'all') {
+      whereClause += ' AND i.trang_thai = ?';
+      params.push(status);
+    }
+    if (month && month !== '0') {
+      whereClause += ' AND i.thang = ?';
+      params.push(parseInt(month));
+    }
+    if (year && year !== '0') {
+      whereClause += ' AND i.nam = ?';
+      params.push(parseInt(year));
+    }
+    if (floor && floor !== 'all') {
+      whereClause += ' AND r.tang = ?';
+      params.push(floor);
+    }
+    if (area && area !== 'all') {
+      whereClause += ' AND n.ten_nha_tro = ?';
+      params.push(area);
+    }
+    if (date) {
+      whereClause += ' AND i.han_thanh_toan LIKE ?';
+      params.push(`${date}%`);
+    }
+
+    const sortField = sortBy || 'i.created_at';
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const allowedSortFields = ['i.created_at', 'i.ma_hoa_don', 'r.so_phong', 't.ho_ten', 'i.tong_tien', 'i.trang_thai'];
+    const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'i.created_at';
+
+    const countResult = await queryOne(`
+      SELECT COUNT(*) as total 
+      FROM hoa_don i 
+      JOIN phong r ON i.phong_id = r.id 
+      LEFT JOIN khach_thue t ON i.khach_thue_id = t.id 
+      ${whereClause}
+    `, params);
+    const totalItems = countResult.total;
+
     const data = await query(`
       SELECT i.*, 
              r.so_phong, n.ten_nha_tro as khu_vuc, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
@@ -1077,8 +1342,10 @@ app.get('/api/invoices', async (req, res) => {
       LEFT JOIN nha_tro n ON r.nha_tro_id = n.id
       LEFT JOIN khach_thue t ON i.khach_thue_id = t.id
       LEFT JOIN chi_so_dien_nuoc mr ON i.chi_so_dien_nuoc_id = mr.id
-      ORDER BY i.created_at DESC
-    `);
+      ${whereClause}
+      ORDER BY ${safeSortField} ${order}
+      LIMIT ? OFFSET ?
+    `, [...params, limit, offset]);
 
     const mapped = data.map(item => ({
       ...mapInvoice(item),
@@ -1117,7 +1384,13 @@ app.get('/api/invoices', async (req, res) => {
       } : null
     }));
 
-    res.json(mapped);
+    res.json({
+      data: mapped,
+      pagination: {
+        page, limit, totalItems, totalPages: Math.ceil(totalItems/limit),
+        hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1253,6 +1526,19 @@ app.post('/api/invoices', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [id, ma_hoa_don, room_id, tenant_id, meter_reading_id, invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, total_amount, status, due_date, notes]);
 
+    if (tenant_id) {
+      await createNotification(req.app.get('io'), {
+        sender_id: 'ADMIN',
+        target_type: 'INDIVIDUAL',
+        target_tenant_id: tenant_id,
+        notification_type: 'INVOICE_CREATED',
+        title: 'Hóa đơn tháng mới',
+        content: `Bạn có hóa đơn mới (Kỳ ${invoice_month}/${invoice_year}) cần thanh toán. Tổng tiền: ${Number(total_amount).toLocaleString('vi-VN')}đ`,
+        reference_id: id,
+        action_url: '/invoices'
+      });
+    }
+
     const invoice = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [id]);
     res.status(201).json(mapInvoice(invoice));
   } catch (error) {
@@ -1352,15 +1638,69 @@ app.get('/api/landlord/contact', async (req, res) => {
 
 app.get('/api/repair_requests', async (req, res) => {
   try {
+    const { page, limit, offset } = getPaginationParams(req);
+    const { search, sortBy, sortOrder, status, month, year, floor, area, date } = req.query;
+
+    let whereClause = 'WHERE 1=1';
+    const params = [];
+
+    if (search) {
+      whereClause += ' AND (r.so_phong LIKE ? OR rr.tieu_de LIKE ? OR t.ho_ten LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (status && status !== 'all') {
+      whereClause += ' AND rr.trang_thai = ?';
+      params.push(status);
+    }
+    if (month && month !== '0') {
+      whereClause += " AND strftime('%m', rr.ngay_bao) = ?";
+      params.push(month.padStart(2, '0'));
+    }
+    if (year && year !== '0') {
+      whereClause += " AND strftime('%Y', rr.ngay_bao) = ?";
+      params.push(year.toString());
+    }
+    if (floor && floor !== 'all') {
+      whereClause += ' AND r.tang = ?';
+      params.push(floor);
+    }
+    if (area && area !== 'all') {
+      whereClause += ' AND n.ten_nha_tro = ?';
+      params.push(area);
+    }
+    if (date) {
+      whereClause += ' AND rr.ngay_bao LIKE ?';
+      params.push(`${date}%`);
+    }
+
+    const sortField = sortBy || 'rr.ngay_bao';
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
+    const allowedSortFields = ['rr.ngay_bao', 'rr.tieu_de', 'r.so_phong', 't.ho_ten', 'rr.trang_thai'];
+    const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'rr.ngay_bao';
+
+    const countResult = await queryOne(`
+      SELECT COUNT(*) as total 
+      FROM yeu_cau_sua_chua rr 
+      JOIN phong r ON rr.phong_id = r.id 
+      LEFT JOIN khach_thue t ON rr.khach_thue_id = t.id 
+      LEFT JOIN nha_tro n ON r.nha_tro_id = n.id
+      ${whereClause}
+    `, params);
+    const totalItems = countResult.total;
+
     const data = await query(`
       SELECT rr.*, 
-             r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
+             r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da, n.ten_nha_tro as khu_vuc,
              t.ho_ten, t.so_dien_thoai, t.email, t.so_cccd, t.ngay_sinh, t.dia_chi, t.lien_he_khan_cap, t.ghi_chu as ghi_chu_khach
       FROM yeu_cau_sua_chua rr
       JOIN phong r ON rr.phong_id = r.id
       LEFT JOIN khach_thue t ON rr.khach_thue_id = t.id
-      ORDER BY rr.ngay_bao DESC
-    `);
+      LEFT JOIN nha_tro n ON r.nha_tro_id = n.id
+      ${whereClause}
+      ORDER BY ${safeSortField} ${order}
+      LIMIT ? OFFSET ?
+    `, [...params, limit, offset]);
 
     const mapped = data.map(item => ({
       ...mapRepair(item),
@@ -1387,7 +1727,13 @@ app.get('/api/repair_requests', async (req, res) => {
       } : null
     }));
 
-    res.json(mapped);
+    res.json({
+      data: mapped,
+      pagination: {
+        page, limit, totalItems, totalPages: Math.ceil(totalItems/limit),
+        hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1
+      }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1453,6 +1799,19 @@ app.post('/api/repair_requests', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `, [id, room_id, tenant_id, title, description, priority, status, assigned_to]);
 
+    if (tenant_id) {
+      await createNotification(req.app.get('io'), {
+        sender_id: tenant_id,
+        target_type: 'ADMIN',
+        target_tenant_id: null,
+        notification_type: 'REPAIR_CREATED',
+        title: 'Yêu cầu sửa chữa mới',
+        content: `Khách thuê vừa tạo yêu cầu sửa chữa: ${title}`,
+        reference_id: id,
+        action_url: '/repairs'
+      });
+    }
+
     const created = await queryOne('SELECT * FROM yeu_cau_sua_chua WHERE id = ?', [id]);
     res.status(201).json(mapRepair(created));
   } catch (error) {
@@ -1488,6 +1847,26 @@ app.put('/api/repair_requests/:id', async (req, res) => {
       SET phong_id = ?, khach_thue_id = ?, tieu_de = ?, mo_ta = ?, muc_do_uu_tien = ?, trang_thai = ?, nguoi_xu_ly = ?, ghi_chu_giai_quyet = ?, ngay_xu_ly_xong = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [updated.phong_id, updated.khach_thue_id, updated.tieu_de, updated.mo_ta, updated.muc_do_uu_tien, updated.trang_thai, updated.nguoi_xu_ly, updated.ghi_chu_giai_quyet, updated.ngay_xu_ly_xong, req.params.id]);
+
+    if (updated.khach_thue_id && existing.trang_thai !== updated.trang_thai) {
+      const statusMap = {
+        'in_progress': 'đang được xử lý',
+        'resolved': 'đã hoàn thành',
+        'cancelled': 'đã bị hủy'
+      };
+      if (statusMap[updated.trang_thai]) {
+        await createNotification(req.app.get('io'), {
+          sender_id: 'ADMIN',
+          target_type: 'INDIVIDUAL',
+          target_tenant_id: updated.khach_thue_id,
+          notification_type: 'REPAIR_UPDATED',
+          title: 'Cập nhật yêu cầu sửa chữa',
+          content: `Yêu cầu "${updated.tieu_de}" ${statusMap[updated.trang_thai]}`,
+          reference_id: req.params.id,
+          action_url: '/repairs'
+        });
+      }
+    }
 
     const result = await queryOne('SELECT * FROM yeu_cau_sua_chua WHERE id = ?', [req.params.id]);
     res.json(mapRepair(result));
@@ -1552,6 +1931,23 @@ app.post('/api/invoices/:id/report-payment', async (req, res) => {
       SET trang_thai = 'paid', ngay_thanh_toan = CURRENT_TIMESTAMP, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [invoiceId]);
+
+    // Lấy thông tin phòng để báo cho Admin
+    let roomStr = "";
+    const room = await queryOne('SELECT so_phong FROM phong WHERE id = ?', [invoice.phong_id]);
+    if (room) roomStr = `Phòng ${room.so_phong} `;
+
+    await createNotification(req.app.get('io'), {
+      sender_id: invoice.khach_thue_id || 'TENANT',
+      target_type: 'ADMIN',
+      target_tenant_id: null,
+      notification_type: 'PAYMENT_SUCCESS',
+      title: 'Khách thuê đã thanh toán',
+      content: `${roomStr}đã chuyển khoản thành công hóa đơn tháng ${invoice.thang_hoa_don}. Tổng tiền: ${Number(invoice.tong_tien).toLocaleString('vi-VN')}đ`,
+      reference_id: invoiceId,
+      action_url: '/invoices'
+    });
+
     res.json({ success: true, message: 'Đã tự động xác nhận thanh toán thành công.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1652,24 +2048,18 @@ app.post('/api/notifications', authenticate, checkRole('ADMIN'), async (req, res
       return res.status(400).json({ error: 'Thiếu thông tin bắt buộc' });
     }
 
-    const result = await run(`
-      INSERT INTO notifications (sender_id, title, content, target_type, target_tenant_id)
-      VALUES (?, ?, ?, ?, ?)
-    `, [req.user.id, title, content, targetType, targetTenantId || null]);
+    await createNotification(req.app.get('io'), {
+      sender_id: req.user.id,
+      target_type: targetType === 'personal' ? 'INDIVIDUAL' : targetType === 'all' ? 'ALL' : 'AREA',
+      target_tenant_id: targetTenantId || null,
+      notification_type: 'ANNOUNCEMENT',
+      title,
+      content,
+      reference_id: null,
+      action_url: '/notifications'
+    });
 
-    const notificationId = result.id;
-
-    // Create recipients
-    if (targetType === 'all') {
-      const tenants = await query("SELECT id FROM khach_thue WHERE ho_ten != 'Chưa cập nhật' OR ho_ten IS NOT NULL");
-      for (const t of tenants) {
-        await run('INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)', [notificationId, t.id]);
-      }
-    } else if (targetType === 'personal' && targetTenantId) {
-      await run('INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)', [notificationId, targetTenantId]);
-    }
-
-    res.json({ success: true, notificationId });
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1677,10 +2067,15 @@ app.post('/api/notifications', authenticate, checkRole('ADMIN'), async (req, res
 
 app.get('/api/notifications/my', authenticate, async (req, res) => {
   try {
+    const { page, limit, offset } = getPaginationParams(req);
     const isArchive = req.query.archive === 'true' ? 1 : 0;
     
     if (req.user.role === 'ADMIN') {
-      // Admin sees all sent notifications with stats
+      const countResult = await queryOne('SELECT COUNT(*) as total FROM notifications WHERE is_deleted = ?', [isArchive]);
+      const totalItems = countResult.total;
+      
+      const unreadResult = await queryOne('SELECT COUNT(*) as unread FROM notifications WHERE target_type = "ADMIN" AND is_read = 0 AND is_deleted = ?', [isArchive]);
+
       const notifs = await query(`
         SELECT n.*, 
           (SELECT COUNT(*) FROM notification_recipients nr WHERE nr.notification_id = n.id) as total_recipients,
@@ -1689,12 +2084,22 @@ app.get('/api/notifications/my', authenticate, async (req, res) => {
         FROM notifications n 
         WHERE n.is_deleted = ?
         ORDER BY n.created_at DESC
-        LIMIT 99
-      `, [isArchive]);
-      res.json(notifs);
+        LIMIT ? OFFSET ?
+      `, [isArchive, limit, offset]);
+      
+      res.json({
+        data: notifs,
+        pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems/limit), hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1 },
+        unreadCount: unreadResult.unread
+      });
     } else {
-      // Tenant sees notifications sent to them
-      if (!req.user.tenant_id) return res.json([]);
+      if (!req.user.tenant_id) return res.json({ data: [], pagination: { page, limit, totalItems: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false }, unreadCount: 0 });
+      
+      const countResult = await queryOne('SELECT COUNT(*) as total FROM notification_recipients WHERE tenant_id = ? AND is_deleted = ?', [req.user.tenant_id, isArchive]);
+      const totalItems = countResult.total;
+
+      const unreadResult = await queryOne('SELECT COUNT(*) as unread FROM notification_recipients WHERE tenant_id = ? AND is_read = 0 AND is_deleted = ?', [req.user.tenant_id, isArchive]);
+
       const notifs = await query(`
         SELECT n.*, nr.is_read, nr.read_at,
           (SELECT COUNT(*) FROM notification_replies nrep WHERE nrep.notification_id = n.id) as reply_count
@@ -1702,9 +2107,14 @@ app.get('/api/notifications/my', authenticate, async (req, res) => {
         JOIN notification_recipients nr ON n.id = nr.notification_id
         WHERE nr.tenant_id = ? AND nr.is_deleted = ?
         ORDER BY n.created_at DESC
-        LIMIT 99
-      `, [req.user.tenant_id, isArchive]);
-      res.json(notifs);
+        LIMIT ? OFFSET ?
+      `, [req.user.tenant_id, isArchive, limit, offset]);
+
+      res.json({
+        data: notifs,
+        pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems/limit), hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1 },
+        unreadCount: unreadResult.unread
+      });
     }
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1769,8 +2179,23 @@ app.get('/api/notifications/:id', authenticate, async (req, res) => {
 
 app.patch('/api/notifications/:id/read', authenticate, async (req, res) => {
   try {
-    if (req.user.role !== 'ADMIN' && req.user.tenant_id) {
+    if (req.user.role === 'ADMIN') {
+      await run('UPDATE notifications SET is_read = 1, read_at = CURRENT_TIMESTAMP WHERE id = ? AND target_type = "ADMIN" AND is_read = 0', [req.params.id]);
+    } else if (req.user.tenant_id) {
       await run('UPDATE notification_recipients SET is_read = 1, read_at = CURRENT_TIMESTAMP WHERE notification_id = ? AND tenant_id = ? AND is_read = 0', [req.params.id, req.user.tenant_id]);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/notifications/read-all', authenticate, async (req, res) => {
+  try {
+    if (req.user.role === 'ADMIN') {
+      await run('UPDATE notifications SET is_read = 1, read_at = CURRENT_TIMESTAMP WHERE target_type = "ADMIN" AND is_read = 0');
+    } else if (req.user.tenant_id) {
+      await run('UPDATE notification_recipients SET is_read = 1, read_at = CURRENT_TIMESTAMP WHERE tenant_id = ? AND is_read = 0', [req.user.tenant_id]);
     }
     res.json({ success: true });
   } catch (error) {
@@ -1803,6 +2228,70 @@ app.post('/api/notifications/:id/replies', authenticate, async (req, res) => {
   }
 });
 
+// ----------------- FRIENDS API -----------------
+
+app.get('/api/friends', authenticate, async (req, res) => {
+  if (req.user.role !== 'TENANT') return res.json([]);
+  try {
+    const friends = await query(`
+      SELECT f.id as request_id, f.nguoi_gui_id, f.nguoi_nhan_id, f.trang_thai, f.ngay_tao,
+             k.id as tenant_id, k.ho_ten, k.so_dien_thoai
+      FROM danh_ba_ban_be f
+      JOIN khach_thue k ON (k.id = f.nguoi_gui_id OR k.id = f.nguoi_nhan_id)
+      WHERE (f.nguoi_gui_id = ? OR f.nguoi_nhan_id = ?) 
+        AND k.id != ?
+    `, [req.user.tenant_id, req.user.tenant_id, req.user.tenant_id]);
+    res.json(friends);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/friends/request', authenticate, async (req, res) => {
+  if (req.user.role !== 'TENANT') return res.status(403).json({ error: 'Chỉ khách thuê mới được kết bạn' });
+  try {
+    const { phone_number } = req.body;
+    const target = await queryOne('SELECT id FROM khach_thue WHERE so_dien_thoai = ?', [phone_number]);
+    if (!target) return res.status(404).json({ error: 'Không tìm thấy người dùng với số điện thoại này' });
+    if (target.id === req.user.tenant_id) return res.status(400).json({ error: 'Không thể tự kết bạn với chính mình' });
+    
+    const existing = await queryOne('SELECT * FROM danh_ba_ban_be WHERE (nguoi_gui_id = ? AND nguoi_nhan_id = ?) OR (nguoi_gui_id = ? AND nguoi_nhan_id = ?)', [req.user.tenant_id, target.id, target.id, req.user.tenant_id]);
+    if (existing) return res.status(400).json({ error: 'Đã gửi lời mời hoặc đã là bạn bè' });
+    
+    const id = await generatePrefixedIdDB('danh_ba_ban_be', 'FR');
+    await run('INSERT INTO danh_ba_ban_be (id, nguoi_gui_id, nguoi_nhan_id) VALUES (?, ?, ?)', [id, req.user.tenant_id, target.id]);
+    
+    const io = req.app.get('io');
+    if (io) io.emit('friend_update', { target_id: target.id });
+    
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/friends/respond', authenticate, async (req, res) => {
+  if (req.user.role !== 'TENANT') return res.status(403).json({ error: 'Unauthorized' });
+  try {
+    const { request_id, action } = req.body;
+    const reqDb = await queryOne('SELECT * FROM danh_ba_ban_be WHERE id = ? AND nguoi_nhan_id = ? AND trang_thai = "pending"', [request_id, req.user.tenant_id]);
+    if (!reqDb) return res.status(404).json({ error: 'Không tìm thấy lời mời' });
+    
+    if (action === 'accept') {
+      await run('UPDATE danh_ba_ban_be SET trang_thai = "accepted" WHERE id = ?', [request_id]);
+    } else {
+      await run('DELETE FROM danh_ba_ban_be WHERE id = ?', [request_id]);
+    }
+    
+    const io = req.app.get('io');
+    if (io) io.emit('friend_update', { target_id: reqDb.nguoi_gui_id });
+    
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ----------------- CHAT API -----------------
 
 app.get('/api/chat/my-area', authenticate, async (req, res) => {
@@ -1824,6 +2313,7 @@ app.get('/api/chat/my-area', authenticate, async (req, res) => {
 
 app.get('/api/chat', authenticate, async (req, res) => {
   try {
+    const { page, limit, offset } = getPaginationParams(req);
     const isArchive = req.query.archive === 'true' ? 1 : 0;
     const isGroup = req.query.is_group === 'true' ? 1 : 0;
     
@@ -1854,51 +2344,74 @@ app.get('/api/chat', authenticate, async (req, res) => {
         return res.status(403).json({ error: 'Không có quyền truy cập khu vực này' });
       }
 
+      const countResult = await queryOne(`SELECT COUNT(*) as total FROM chat_messages WHERE is_group_chat = 1 AND (receiver_id = ? OR receiver_id IS NULL)`, [receiverId]);
+      const totalItems = countResult.total;
+
       const messages = await query(`
         SELECT c.*, u.full_name as sender_name 
         FROM chat_messages c
         LEFT JOIN users u ON c.sender_id = u.id
-        WHERE c.is_group_chat = 1 AND c.is_deleted = ? AND (c.receiver_id = ? OR c.receiver_id IS NULL)
+        WHERE c.is_group_chat = 1 AND (c.receiver_id = ? OR c.receiver_id IS NULL)
         ORDER BY c.created_at DESC
-        LIMIT 99
-      `, [isArchive, receiverId]);
-      return res.json(messages.reverse());
+        LIMIT ? OFFSET ?
+      `, [receiverId, limit, offset]);
+
+      return res.json({
+        data: messages.reverse(),
+        pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems/limit), hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1 }
+      });
     }
 
     // 1-1 Chat
     const receiverId = req.query.receiver_id;
-    if (!receiverId && req.user.role === 'ADMIN') return res.json([]); 
+    if (!receiverId && req.user.role === 'ADMIN') return res.json({ data: [], pagination: { page, limit, totalItems: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false } }); 
     
-    const tenantIdStr = req.user.role === 'TENANT' ? req.user.tenant_id : receiverId;
-
-    // Mark as read
+    let target1, target2;
     if (req.user.role === 'ADMIN') {
+      target1 = 'ADMIN';
+      target2 = receiverId;
+      // Mark as read
       await run(`
         UPDATE chat_messages 
         SET is_read = 1 
-        WHERE is_group_chat = 0 AND sender_role = 'TENANT' AND sender_id = ? AND receiver_id = 'ADMIN' AND is_read = 0
-      `, [tenantIdStr]);
+        WHERE is_group_chat = 0 AND sender_id = ? AND receiver_id = 'ADMIN' AND is_read = 0
+      `, [target2]);
     } else {
+      target1 = req.user.tenant_id;
+      target2 = receiverId || 'ADMIN';
+      // Mark as read
       await run(`
         UPDATE chat_messages 
         SET is_read = 1 
-        WHERE is_group_chat = 0 AND sender_role = 'ADMIN' AND receiver_id = ? AND is_read = 0
-      `, [tenantIdStr]);
+        WHERE is_group_chat = 0 AND sender_id = ? AND receiver_id = ? AND is_read = 0
+      `, [target2, target1]);
     }
+
+    const countResult = await queryOne(`
+      SELECT COUNT(*) as total 
+      FROM chat_messages 
+      WHERE is_group_chat = 0 
+      AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
+    `, [target1, target2, target2, target1]);
+    const totalItems = countResult.total;
 
     const messages = await query(`
       SELECT c.*, u.full_name as sender_name 
       FROM chat_messages c
       LEFT JOIN users u ON c.sender_id = u.id
-      WHERE c.is_group_chat = 0 AND c.is_deleted = ?
+      WHERE c.is_group_chat = 0
       AND (
-        (c.sender_role = 'ADMIN' AND c.receiver_id = ?) OR
-        (c.sender_role = 'TENANT' AND c.sender_id = ?)
+        (c.sender_id = ? AND c.receiver_id = ?) OR
+        (c.sender_id = ? AND c.receiver_id = ?)
       )
       ORDER BY c.created_at DESC
-      LIMIT 99
-    `, [isArchive, tenantIdStr, tenantIdStr]);
-    res.json(messages.reverse());
+      LIMIT ? OFFSET ?
+    `, [target1, target2, target2, target1, limit, offset]);
+
+    return res.json({
+      data: messages.reverse(),
+      pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems/limit), hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1 }
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1909,16 +2422,16 @@ app.post('/api/chat', authenticate, async (req, res) => {
     const { content, is_group, receiver_id } = req.body;
     if (!content) return res.status(400).json({ error: 'Nội dung không được để trống' });
     
-    // Group chat is Read-Only for TENANT
-    if (is_group && req.user.role === 'TENANT') {
-      return res.status(403).json({ error: 'Khách thuê chỉ được phép xem nhóm chat' });
+    // Group ALL is Read-Only for TENANT
+    if (is_group && receiver_id === 'ALL' && req.user.role === 'TENANT') {
+      return res.status(403).json({ error: 'Khách thuê chỉ được phép xem nhóm chat Tất cả khu trọ' });
     }
 
     let targetId = receiver_id;
     if (is_group) {
       targetId = receiver_id || 'ALL';
     } else {
-      targetId = req.user.role === 'TENANT' ? 'ADMIN' : receiver_id;
+      targetId = (req.user.role === 'TENANT' && !receiver_id) ? 'ADMIN' : receiver_id;
     }
 
     const senderId = req.user.role === 'TENANT' ? req.user.tenant_id : req.user.id;
@@ -1928,6 +2441,12 @@ app.post('/api/chat', authenticate, async (req, res) => {
       VALUES (?, ?, ?, ?, ?)
     `, [senderId, req.user.role, targetId, is_group ? 1 : 0, content]);
     
+    // Emit socket event
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('chat_message', { senderId, targetId, is_group });
+    }
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1952,6 +2471,64 @@ app.patch('/api/chat/:id/restore', authenticate, async (req, res) => {
   }
 });
 
+// ----------------- BADGES API -----------------
+app.get('/api/badges', authenticate, async (req, res) => {
+  try {
+    let unreadChat = 0;
+    let notifications = { total: 0, INVOICE_CREATED: 0, REPAIR_CREATED: 0, REPAIR_UPDATED: 0, PAYMENT_SUCCESS: 0, ANNOUNCEMENT: 0 };
+    let invoiceCount = 0;
+    let repairCount = 0;
+
+    if (req.user.role === 'ADMIN') {
+      const c = await queryOne(`SELECT COUNT(*) as count FROM chat_messages WHERE is_group_chat = 0 AND receiver_id = 'ADMIN' AND is_read = 0 AND is_deleted = 0`);
+      unreadChat = c.count;
+      
+      const adminNotifs = await query(`
+        SELECT notification_type, COUNT(*) as count
+        FROM notifications
+        WHERE target_type = 'ADMIN' AND is_read = 0 AND is_deleted = 0
+        GROUP BY notification_type
+      `);
+      adminNotifs.forEach(n => {
+        notifications[n.notification_type] = n.count;
+        notifications.total += n.count;
+      });
+
+      invoiceCount = notifications.PAYMENT_SUCCESS || 0;
+      repairCount = notifications.REPAIR_CREATED || 0;
+    } else {
+      const c = await queryOne(`SELECT COUNT(*) as count FROM chat_messages WHERE is_group_chat = 0 AND receiver_id = ? AND is_read = 0 AND is_deleted = 0`, [req.user.tenant_id]);
+      unreadChat = c.count;
+      
+      const tenantNotifs = await query(`
+        SELECT n.notification_type, COUNT(*) as count
+        FROM notification_recipients nr
+        JOIN notifications n ON nr.notification_id = n.id
+        WHERE nr.tenant_id = ? AND nr.is_read = 0 AND nr.is_deleted = 0
+        GROUP BY n.notification_type
+      `, [req.user.tenant_id]);
+      
+      tenantNotifs.forEach(n => {
+        notifications[n.notification_type] = n.count;
+        notifications.total += n.count;
+      });
+
+      invoiceCount = notifications.INVOICE_CREATED || 0;
+      repairCount = notifications.REPAIR_UPDATED || 0;
+    }
+
+    res.json({ 
+      chat: unreadChat, 
+      notifications: notifications.total, 
+      invoices: invoiceCount, 
+      repairs: repairCount,
+      notificationDetails: notifications
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Auto cleanup deleted items older than 30 days
 async function cleanupDeletedItems() {
   try {
@@ -1968,7 +2545,7 @@ setTimeout(cleanupDeletedItems, 5000); // run 5 seconds after startup
 
 // Start server
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(port, () => {
+  server.listen(port, () => {
     console.log(`Server is running on http://localhost:${port}`);
   });
 }

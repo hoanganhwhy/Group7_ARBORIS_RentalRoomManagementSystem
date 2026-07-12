@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Plus, Users, Edit2, Trash2, Phone, Mail, Home, Crown, LogOut, UserPlus, Search, Eye, EyeOff } from 'lucide-react';
+import { Plus, Users, Edit2, Trash2, Phone, Mail, Home, Crown, LogOut, UserPlus, Eye, EyeOff } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { Button } from '../components/ui/Button';
-import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { Input, Spinner, EmptyState } from '../components/ui/Input';
 import {
   getTenants,
   createTenant,
@@ -11,9 +11,13 @@ import {
   getRooms,
   assignTenantToRoom,
   endRoomAssignment,
-  getExpiringContracts
+  getExpiringContracts,
 } from '../lib/api';
+
 import type { Tenant, Room, RoomAssignment } from '../types';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
 
 const countryCodes = [
   { code: '+84', label: 'VN (+84)' },
@@ -64,6 +68,10 @@ export function Tenants() {
   const [filterExpiring, setFilterExpiring] = useState<boolean>(false);
   const [expiringContracts, setExpiringContracts] = useState<RoomAssignment[]>([]);
 
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
+
   const [formData, setFormData] = useState({
     full_name: '',
     phone: '',
@@ -93,17 +101,21 @@ export function Tenants() {
   const [saving, setSaving] = useState(false);
   const parsedPhone = parsePhone(formData.phone);
 
-  useEffect(() => { loadData(); }, []);
+  // loadData uses the dependencies listed below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadData(); }, [page, limit, searchQuery]);
 
   async function loadData() {
     try {
+      setLoading(true);
       const [tenantsData, roomsData, expiringData] = await Promise.all([
-        getTenants(), 
-        getRooms(),
+        getTenants({ page, limit, search: searchQuery }), 
+        getRooms({ limit: 100 }), // Lấy đủ phòng để mapping
         getExpiringContracts(30).catch(() => [] as RoomAssignment[])
       ]);
-      setTenants(tenantsData);
-      setRooms(roomsData);
+      setTenants(tenantsData.data || []);
+      setPagination(tenantsData.pagination);
+      setRooms(roomsData.data || []);
       setExpiringContracts(expiringData);
     } catch (error) {
       console.error('Failed to load data:', error);
@@ -111,6 +123,11 @@ export function Tenants() {
       setLoading(false);
     }
   }
+
+  // Reset trang khi thay đổi search
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, filterFloor, filterArea, filterRent, filterOccupants, filterExpiring]);
 
   function getTenantAssignment(tenantId: string): { room: Room; assignment: RoomAssignment } | null {
     for (const room of rooms) {
@@ -141,7 +158,6 @@ export function Tenants() {
 
   const filteredTenants = tenants.filter((t) => {
     if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase().replace(/\D/g, '') || searchQuery.toLowerCase();
     const nameMatch = t.full_name.toLowerCase().includes(searchQuery.toLowerCase());
     const phoneMatch = t.phone
       ? t.phone.replace(/\D/g, '').includes(searchQuery.replace(/\D/g, '')) ||
@@ -297,7 +313,7 @@ export function Tenants() {
       }
       await loadData();
       setIsModalOpen(false);
-    } catch (error) {
+    } catch {
       alert('Không thể lưu thông tin. Vui lòng thử lại.');
     } finally {
       setSaving(false);
@@ -333,7 +349,7 @@ export function Tenants() {
     try {
       await endRoomAssignment(assignment.id);
       await loadData();
-    } catch (error) {
+    } catch {
       alert('Không thể trả phòng. Vui lòng thử lại.');
     }
   }
@@ -344,7 +360,7 @@ export function Tenants() {
       await deleteTenant(deletingTenant.id);
       await loadData();
       setIsDeleteModalOpen(false);
-    } catch (error) {
+    } catch {
       alert('Không thể xóa người thuê. Có thể vẫn còn dữ liệu liên quan.');
     }
   }
@@ -380,15 +396,11 @@ export function Tenants() {
         <>
           {/* Filters & Search */}
           <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400" />
-              <input
-                type="text"
-                placeholder="Tìm theo tên hoặc số điện thoại..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full max-w-md pl-11 pr-4 py-3 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-              />
+            <div className="flex justify-between items-center">
+              <div className="w-80">
+                <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm theo tên hoặc số điện thoại..." />
+              </div>
+              <PageSizeSelector limit={limit} onLimitChange={setLimit} />
             </div>
             {/* Advanced Filters */}
             <div className="flex gap-4 items-center bg-white p-3 rounded-xl border border-charcoal-100 shadow-sm flex-wrap">
@@ -463,6 +475,17 @@ export function Tenants() {
               );
             })}
           </div>
+          
+          {/* Pagination component */}
+          {!loading && filteredTenants.length > 0 && (
+            <Pagination
+              currentPage={page}
+              totalPages={pagination.totalPages}
+              hasNextPage={pagination.hasNextPage}
+              hasPreviousPage={pagination.hasPreviousPage}
+              onPageChange={setPage}
+            />
+          )}
         </>
       )}
 

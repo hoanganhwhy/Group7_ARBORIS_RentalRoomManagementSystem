@@ -19,13 +19,15 @@ import {
   createInvoice,
   updateInvoice,
   deleteInvoice,
-  markInvoicePaid,
   markOverdueInvoices,
   getRooms,
   getMeterReadings,
   confirmPayment,
 } from '../lib/api';
 import type { Invoice, Room, MeterReading } from '../types';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
 
 export function Invoices() {
   const { user } = useAuth();
@@ -39,12 +41,22 @@ export function Invoices() {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
-  const [filter, setFilter] = useState<'pending' | 'paid' | 'overdue' | 'waiting_confirmation'>('pending');
+  const [filter, setFilter] = useState<
+    'all' | 'pending' | 'paid' | 'overdue' | 'waiting_confirmation'
+  >('pending');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
   const [filterYear, setFilterYear] = useState<number>(0); // 0 = all
   const [filterFloor, setFilterFloor] = useState<string>('all');
   const [filterArea, setFilterArea] = useState<string>('all');
   const [filterDate, setFilterDate] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
+
+  // Add state for all invoices to compute summary
+  const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
 
   const [formData, setFormData] = useState({
     room_id: '',
@@ -61,22 +73,43 @@ export function Invoices() {
 
   const [saving, setSaving] = useState(false);
 
+  // loadData uses the dependencies listed below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [page, limit, filter, filterMonth, filterYear, filterFloor, filterArea, filterDate, searchQuery]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filter, filterMonth, filterYear, filterFloor, filterArea, filterDate, searchQuery]);
 
   async function loadData() {
     try {
+      setLoading(true);
       // Mark any pending invoices past their due date as overdue before fetching
       await markOverdueInvoices().catch(() => {});
-      const [invoicesData, roomsData, readingsData] = await Promise.all([
-        getInvoices(),
-        getRooms(),
-        getMeterReadings(),
+      const [invoicesData, allInvoicesData, roomsData, readingsData] = await Promise.all([
+        getInvoices({
+          page,
+          limit,
+          search: searchQuery,
+          status: filter !== 'all' ? filter : undefined,
+          month: filterMonth > 0 ? filterMonth.toString() : undefined,
+          year: filterYear > 0 ? filterYear.toString() : undefined,
+          floor: filterFloor !== 'all' ? filterFloor : undefined,
+          area: filterArea !== 'all' ? filterArea : undefined,
+          date: filterDate || undefined,
+        } as any),
+        getInvoices({ limit: 10000 }), // Fetch all for summary stats
+        getRooms({ limit: 100 }),
+        getMeterReadings({ limit: 1000 }),
       ]);
-      setInvoices(invoicesData);
-      setRooms(roomsData);
-      setReadings(readingsData);
+      setInvoices(invoicesData.data || []);
+      setPagination(invoicesData.pagination);
+      setAllInvoices(allInvoicesData.data || []);
+      setRooms(roomsData.data || []);
+      setReadings(readingsData.data || []);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -104,14 +137,14 @@ export function Invoices() {
   function openEditModal(invoice: Invoice) {
     setEditingInvoice(invoice);
     setFormData({
-      room_id: invoice.room_id,
-      meter_reading_id: invoice.meter_reading_id || '',
+      room_id: String(invoice.room_id),
+      meter_reading_id: invoice.meter_reading_id ? String(invoice.meter_reading_id) : '',
       invoice_month: invoice.invoice_month,
       invoice_year: invoice.invoice_year,
       room_rent: invoice.room_rent ?? '',
       electricity_cost: invoice.electricity_cost ?? '',
       water_cost: invoice.water_cost ?? '',
-      other_fees: invoice.other_fees ?? '',
+      other_fees: invoice.other_fees != null ? String(invoice.other_fees) : '',
       due_date: invoice.due_date || '',
       notes: invoice.notes || '',
     });
@@ -175,7 +208,7 @@ export function Invoices() {
         electricity_cost: elecVal,
         water_cost: waterVal,
         other_fees: otherVal,
-        tenant_id: room?.current_assignment?.tenant_id || null,
+        tenant_id: room?.current_tenant?.id || room?.current_assignment?.tenant_id || null,
         total_amount: totalAmount,
         status: editingInvoice ? editingInvoice.status : ('pending' as const),
       };
@@ -228,22 +261,10 @@ export function Invoices() {
   };
 
   const userInvoices = isTenant 
-    ? invoices.filter(i => i.tenant_id === user?.tenant_id)
-    : invoices;
+    ? allInvoices.filter(i => i.tenant_id === user?.tenant_id)
+    : allInvoices;
 
-  const filteredInvoices = userInvoices.filter((invoice) => {
-    let matchesStatus = invoice.status === filter;
-    if (isTenant && filter === 'pending') {
-      matchesStatus = invoice.status === 'pending' || invoice.status === 'overdue';
-    }
-    
-    const matchesYear = filterYear === 0 || invoice.invoice_year === filterYear;
-    const matchesMonth = filterMonth === 0 || invoice.invoice_month === filterMonth;
-    const matchesFloor = filterFloor === 'all' || (invoice.room && invoice.room.floor.toString() === filterFloor);
-    const matchesArea = filterArea === 'all' || (invoice.room && invoice.room.area === filterArea);
-    const matchesDate = !filterDate || (invoice.due_date && invoice.due_date.startsWith(filterDate));
-    return matchesStatus && matchesYear && matchesMonth && matchesFloor && matchesArea && matchesDate;
-  });
+  const filteredInvoices = invoices; // Backend handles filtering now
 
   const statusCounts = {
     pending: userInvoices.filter(i => i.status === 'pending').length,
@@ -402,6 +423,10 @@ export function Invoices() {
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
+            <div className="w-64 ml-auto">
+              <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm hóa đơn..." />
+            </div>
+            <PageSizeSelector limit={limit} onLimitChange={setLimit} />
           </div>
       </section>
 
@@ -416,6 +441,7 @@ export function Invoices() {
           />
         </div>
       ) : (
+        <>
         <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
           <table className="w-full">
             <thead>
@@ -505,9 +531,21 @@ export function Invoices() {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+          
+          {/* Pagination component */}
+          {!loading && filteredInvoices.length > 0 && (
+            <Pagination
+              currentPage={page}
+              totalPages={pagination.totalPages}
+              hasNextPage={pagination.hasNextPage}
+              hasPreviousPage={pagination.hasPreviousPage}
+              onPageChange={setPage}
+            />
+          )}
+        </>
       )}
 
       {/* Create/Edit Modal */}
@@ -546,7 +584,7 @@ export function Invoices() {
               options={[
                 { value: '', label: '-- Chọn chỉ số --' },
                 ...readings
-                  .filter((r) => r.room_id === formData.room_id)
+                  .filter((r) => String(r.room_id) === String(formData.room_id))
                   .map((r) => ({
                     value: r.id,
                     label: `${new Date(r.reading_date).toLocaleDateString('vi-VN')}`,
@@ -689,7 +727,13 @@ export function Invoices() {
   );
 }
 
-function InvoiceStatusBadge({ status, isTenant }: { status: string, isTenant?: boolean }) {
+function InvoiceStatusBadge({
+  status,
+  isTenant,
+}: {
+  status: Invoice['status'];
+  isTenant?: boolean;
+}) {
   const variants: Record<Invoice['status'], 'default' | 'success' | 'warning' | 'danger'> = {
     pending: 'default',
     paid: 'success',

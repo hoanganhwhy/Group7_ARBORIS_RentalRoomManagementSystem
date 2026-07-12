@@ -10,7 +10,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { Badge, Spinner } from '../components/ui/Input';
-import { getDashboardStats } from '../lib/api';
+import { getDashboardStats, getRepairRequests } from '../lib/api';
 import type { Invoice, RepairRequest, Page } from '../types';
 
 export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) {
@@ -18,13 +18,41 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadStats();
+    void loadStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadStats() {
     try {
-      const data = await getDashboardStats();
-      setStats(data as typeof stats);
+      const [dashboardData, repairsData] = await Promise.all([
+        getDashboardStats(),
+        getRepairRequests({ limit: 10000 } as any),
+      ]);
+
+      const allRepairs = repairsData.data || [];
+      const pendingRepairs = allRepairs.filter(
+        (repair: RepairRequest) =>
+          repair.status === 'new' ||
+          repair.status === 'in_progress'
+      ).length;
+
+      const recentRepairs = [...allRepairs]
+        .sort((a: RepairRequest, b: RepairRequest) => {
+          const aTime = new Date(
+            a.reported_at || (a as any).created_at || 0
+          ).getTime();
+          const bTime = new Date(
+            b.reported_at || (b as any).created_at || 0
+          ).getTime();
+          return bTime - aTime;
+        })
+        .slice(0, 5);
+
+      setStats({
+        ...dashboardData,
+        pendingRepairs,
+        recentRepairs,
+      } as typeof stats);
     } catch (error) {
       console.error('Failed to load stats:', error);
     } finally {

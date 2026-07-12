@@ -28,7 +28,15 @@ import {
   extendContract,
 } from '../lib/api';
 import type { Room, Tenant, RoomAssignment } from '../types';
-import { Search, AlertTriangle, CalendarDays, RefreshCw, LayoutGrid, List as ListIcon, FileText } from 'lucide-react';
+import { AlertTriangle, CalendarDays, RefreshCw, LayoutGrid, List as ListIcon, FileText } from 'lucide-react';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
+
+type ContractRoomAssignment = RoomAssignment & {
+  file_hop_dong?: string;
+  trang_thai_ky?: string;
+};
 
 export function Rooms() {
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -52,6 +60,9 @@ export function Rooms() {
   const [filterExpiring, setFilterExpiring] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
   const [expiringContracts, setExpiringContracts] = useState<RoomAssignment[]>([]);
   const [extendData, setExtendData] = useState({
     contract_end_date: '',
@@ -82,24 +93,52 @@ export function Rooms() {
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const availableAreas = Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort();
 
-  useEffect(() => { loadData(); }, []);
+  // Trạng thái tổng số liệu (tuỳ chọn nếu backend trả về, tạm thời hiển thị từ dữ liệu hiện tại)
+  const [statusCounts, setStatusCounts] = useState({ all: 0, available: 0, occupied: 0, maintenance: 0 });
+
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, limit, filter, filterFloor, filterArea, searchQuery]);
 
   async function loadData() {
     try {
+      setLoading(true);
       const [roomsData, tenantsData, expiringData] = await Promise.all([
-        getRooms(),
-        getTenants(),
+        getRooms({ 
+          page, 
+          limit, 
+          search: searchQuery,
+          status: filter !== 'all' ? filter : undefined,
+          area: filterArea !== 'all' ? filterArea : undefined,
+          floor: filterFloor !== 'all' ? filterFloor : undefined
+        } as any),
+        getTenants({ limit: 100 }),
         getExpiringContracts(30).catch(() => [] as RoomAssignment[]),
       ]);
-      setRooms(roomsData);
-      setTenants(tenantsData);
+      setRooms(roomsData.data);
+      setPagination(roomsData.pagination);
+      setTenants(tenantsData.data || []);
       setExpiringContracts(expiringData);
+      
+      // Calculate dummy counts for now since we don't have global counts
+      setStatusCounts({
+        all: roomsData.pagination.totalItems,
+        available: filter === 'available' ? roomsData.pagination.totalItems : 0,
+        occupied: filter === 'occupied' ? roomsData.pagination.totalItems : 0,
+        maintenance: filter === 'maintenance' ? roomsData.pagination.totalItems : 0,
+      });
     } catch (error) {
       console.error('Failed to load rooms:', error);
     } finally {
       setLoading(false);
     }
   }
+
+  // Reset trang khi thay đổi bộ lọc
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, filter, filterFloor, filterArea, filterRent, filterOccupants, filterExpiring]);
 
   function openCreateModal() {
     setEditingRoom(null);
@@ -180,7 +219,7 @@ export function Rooms() {
       await extendContract(extendingAssignment.id, extendData.contract_end_date);
       await loadData();
       setIsExtendModalOpen(false);
-    } catch (error) {
+    } catch {
       alert('Không thể gia hạn hợp đồng. Vui lòng thử lại.');
     } finally {
       setSaving(false);
@@ -188,8 +227,9 @@ export function Rooms() {
   }
 
   async function handleGenerateContract(assignment: RoomAssignment) {
+    const contractAssignment = assignment as ContractRoomAssignment;
     try {
-      if (assignment.file_hop_dong) {
+      if (contractAssignment.file_hop_dong) {
         window.open(`http://localhost:5000/api/contracts/${assignment.id}/download`, '_blank');
         return;
       }
@@ -204,14 +244,14 @@ export function Rooms() {
       } else {
         alert('Lỗi khi tạo hợp đồng');
       }
-    } catch (error) {
+    } catch {
       alert('Lỗi hệ thống');
     }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (formData.floor > 50) {
+    if (Number(formData.floor) > 50) {
       alert('Tầng không được vượt quá 50.');
       return;
     }
@@ -298,7 +338,7 @@ export function Rooms() {
         const updated = rooms.find(r => r.id.toString() === viewingRoom.id.toString());
         if (updated) setViewingRoom(updated);
       }
-    } catch (error) {
+    } catch {
       alert('Không thể trả phòng. Vui lòng thử lại.');
     }
   }
@@ -307,7 +347,7 @@ export function Rooms() {
     try {
       await setPrimaryTenant(assignment.id, roomId);
       await loadData();
-    } catch (error) {
+    } catch {
       alert('Không thể cập nhật chủ hợp đồng.');
     }
   }
@@ -337,12 +377,6 @@ export function Rooms() {
 
     return matchesStatus && matchesSearch && matchesArea && matchesFloor && matchesRent && matchesOccupants && matchesExpiring;
   });
-  const statusCounts = {
-    all: rooms.length,
-    available: rooms.filter((r) => r.status === 'available').length,
-    occupied: rooms.filter((r) => r.status === 'occupied').length,
-    maintenance: rooms.filter((r) => r.status === 'maintenance').length,
-  };
 
   const availableForAssign = tenants.filter(
     (t) => !assigningRoom?.active_assignments?.some((a) => a.tenant_id === t.id)
@@ -395,16 +429,10 @@ export function Rooms() {
                 <ListIcon className="w-4 h-4" />
               </button>
             </div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400" />
-              <input
-                type="text"
-                placeholder="Tìm theo số phòng..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-4 py-2.5 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors w-48"
-              />
+            <div className="w-64">
+              <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm theo số phòng..." />
             </div>
+            <PageSizeSelector limit={limit} onLimitChange={setLimit} />
           </div>
         </div>
         
@@ -475,7 +503,7 @@ export function Rooms() {
                     <div className="flex items-center gap-3">
                       <CalendarDays className="w-4 h-4 text-amber-600" />
                       <span className="text-sm font-medium text-charcoal-900">
-                        {assignment.tenant?.full_name} - {assignment.room ? `${assignment.room.area} - P.${assignment.room.room_number}` : `Phòng ${assignment.room?.room_number}`}
+                        {assignment.tenant?.full_name} - {assignment.room ? `${assignment.room.area} - P.${assignment.room.room_number}` : 'Chưa xác định phòng'}
                       </span>
                       <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
                         Hết hạn: {assignment.contract_end_date ? new Date(assignment.contract_end_date).toLocaleDateString('vi-VN') : 'N/A'}
@@ -584,6 +612,17 @@ export function Rooms() {
             </tbody>
           </table>
         </div>
+      )}
+      
+      {/* Pagination component at bottom */}
+      {!loading && filteredRooms.length > 0 && (
+        <Pagination
+          currentPage={page}
+          totalPages={pagination.totalPages}
+          hasNextPage={pagination.hasNextPage}
+          hasPreviousPage={pagination.hasPreviousPage}
+          onPageChange={setPage}
+        />
       )}
 
       {/* Room Detail Modal */}
@@ -895,6 +934,7 @@ function PropertyCard({
   onAssignTenant,
   onCheckout,
   onSetPrimary,
+  onGenerateContract,
 }: {
   room: Room;
   onView: () => void;
@@ -982,6 +1022,7 @@ function PropertyCard({
               const today = new Date();
               const daysUntilExpiry = contractEndDate ? Math.ceil((contractEndDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) : null;
               const isExpiringSoon = daysUntilExpiry !== null && daysUntilExpiry <= 30 && daysUntilExpiry > 0;
+              const contractAssignment = assignment as ContractRoomAssignment;
 
               return (
                 <div key={assignment.id} className="flex items-center justify-between py-2">
@@ -1021,8 +1062,8 @@ function PropertyCard({
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); onGenerateContract(assignment); }}
-                      className={`p-1.5 rounded-lg transition-colors ${assignment.file_hop_dong ? 'text-blue-500 bg-blue-50 hover:bg-blue-100' : 'text-charcoal-300 hover:text-blue-500 hover:bg-blue-50'}`}
-                      title={assignment.file_hop_dong ? (assignment.trang_thai_ky === 'Đã ký' ? 'Hợp đồng đã ký (Tải về)' : 'Tải hợp đồng (Chờ ký)') : 'Tạo hợp đồng PDF'}
+                      className={`p-1.5 rounded-lg transition-colors ${contractAssignment.file_hop_dong ? 'text-blue-500 bg-blue-50 hover:bg-blue-100' : 'text-charcoal-300 hover:text-blue-500 hover:bg-blue-50'}`}
+                      title={contractAssignment.file_hop_dong ? (contractAssignment.trang_thai_ky === 'Đã ký' ? 'Hợp đồng đã ký (Tải về)' : 'Tải hợp đồng (Chờ ký)') : 'Tạo hợp đồng PDF'}
                     >
                       <FileText className="w-4 h-4" />
                     </button>

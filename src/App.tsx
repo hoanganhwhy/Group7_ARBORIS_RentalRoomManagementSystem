@@ -33,7 +33,7 @@ function AppContent() {
     switch (currentPage) {
       case 'dashboard':
         if (user?.role === 'GUEST') return <div className="p-8 text-center"><h1 className="text-2xl font-bold text-terra-600 mb-4">Chào mừng bạn!</h1><p>Bạn đã đăng nhập thành công. Hãy liên hệ Chủ nhà để được xếp phòng nhé.</p></div>;
-        return user?.role === 'TENANT' ? <TenantDashboard /> : <Dashboard onNavigate={setCurrentPage} />;
+        return user?.role === 'TENANT' ? <TenantDashboard onNavigate={setCurrentPage} /> : <Dashboard onNavigate={setCurrentPage} />;
       case 'rooms':
         return <Rooms />;
       case 'tenants':
@@ -47,7 +47,7 @@ function AppContent() {
       case 'repairs':
         return <Repairs />;
       case 'notifications':
-        return user?.role === 'TENANT' ? <NotificationsTenant /> : <NotificationsAdmin />;
+        return user?.role === 'TENANT' ? <NotificationsTenant onNavigate={setCurrentPage} /> : <NotificationsAdmin onNavigate={setCurrentPage} />;
       case 'chat':
         return user?.role === 'TENANT' ? <ChatTenant /> : <ChatAdmin />;
 

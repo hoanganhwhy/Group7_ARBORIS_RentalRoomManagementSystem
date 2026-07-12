@@ -1,5 +1,26 @@
 import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest, RoommateRequest } from '../types';
 
+export interface PaginationParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalItems: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+  unreadCount?: number;
+}
+
 const BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -27,8 +48,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 // Rooms API
-export async function getRooms(): Promise<Room[]> {
-  return request<Room[]>('/rooms');
+export async function getRooms(params?: PaginationParams): Promise<PaginatedResponse<Room>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return request<PaginatedResponse<Room>>(`/rooms${query}`);
 }
 
 export async function getRoom(id: string): Promise<Room | null> {
@@ -56,8 +78,9 @@ export async function deleteRoom(id: string): Promise<void> {
 }
 
 // Users API
-export async function getAdminUsers(): Promise<any[]> {
-  return request<any[]>('/admin/users');
+export async function getAdminUsers(params?: PaginationParams): Promise<PaginatedResponse<any>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return request<PaginatedResponse<any>>(`/admin/users${query}`);
 }
 
 export async function createTenantUser(username: string, password: string, full_name: string, phone: string): Promise<any> {
@@ -76,8 +99,9 @@ export async function sendAiMessage(message: string, role: string, tenantId?: st
 }
 
 // Tenants API
-export async function getTenants(): Promise<Tenant[]> {
-  return request<Tenant[]>('/tenants');
+export async function getTenants(params?: PaginationParams): Promise<PaginatedResponse<Tenant>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return request<PaginatedResponse<Tenant>>(`/tenants${query}`);
 }
 
 export async function getTenant(id: string): Promise<Tenant | null> {
@@ -153,8 +177,9 @@ export async function getExpiringContracts(withinDays: number = 30): Promise<Roo
 }
 
 // Meter Readings API
-export async function getMeterReadings(): Promise<MeterReading[]> {
-  return request<MeterReading[]>('/meter_readings');
+export async function getMeterReadings(params?: PaginationParams): Promise<PaginatedResponse<MeterReading>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return request<PaginatedResponse<MeterReading>>(`/meter_readings${query}`);
 }
 
 export async function getMeterReadingsByRoom(roomId: string): Promise<MeterReading[]> {
@@ -186,8 +211,9 @@ export async function deleteMeterReading(id: string): Promise<void> {
 }
 
 // Invoices API
-export async function getInvoices(): Promise<Invoice[]> {
-  return request<Invoice[]>('/invoices');
+export async function getInvoices(params?: PaginationParams): Promise<PaginatedResponse<Invoice>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return request<PaginatedResponse<Invoice>>(`/invoices${query}`);
 }
 
 export async function getInvoice(id: string): Promise<Invoice | null> {
@@ -227,8 +253,9 @@ export async function markInvoicePaid(id: string): Promise<Invoice> {
 }
 
 // Repair Requests API
-export async function getRepairRequests(): Promise<RepairRequest[]> {
-  return request<RepairRequest[]>('/repair_requests');
+export async function getRepairRequests(params?: PaginationParams): Promise<PaginatedResponse<RepairRequest>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return request<PaginatedResponse<RepairRequest>>(`/repair_requests${query}`);
 }
 
 export async function getRepairRequest(id: string): Promise<RepairRequest | null> {
@@ -279,12 +306,17 @@ export async function closeRoommateRequest(id: number): Promise<{ success: boole
 
 // Dashboard stats
 export async function getDashboardStats() {
-  const [rooms, tenants, invoices, repairs] = await Promise.all([
-    getRooms(),
-    getTenants(),
-    getInvoices(),
-    getRepairRequests(),
+  const [roomsRes, tenantsRes, invoicesRes, repairsRes] = await Promise.all([
+    getRooms({ limit: 10000 }),
+    getTenants({ limit: 10000 }),
+    getInvoices({ limit: 10000 }),
+    getRepairRequests({ limit: 10000 }),
   ]);
+
+  const rooms = roomsRes.data || [];
+  const tenants = tenantsRes.data || [];
+  const invoices = invoicesRes.data || [];
+  const repairs = repairsRes.data || [];
 
   const totalRevenue = invoices
     .filter(i => i.status === 'paid')
@@ -351,8 +383,11 @@ export async function updateSettings(data: any) {
 }
 
 // --- NOTIFICATIONS API ---
-export async function getNotifications(): Promise<any> {
-  return request<any>('/notifications/my');
+export async function getNotifications(params?: PaginationParams & { archive?: boolean }): Promise<PaginatedResponse<any>> {
+  const queryParams: any = { ...params };
+  if (params?.archive) queryParams.archive = 'true';
+  const query = `?${new URLSearchParams(queryParams).toString()}`;
+  return request<PaginatedResponse<any>>(`/notifications/my${query}`);
 }
 
 export async function getNotificationDetail(id: number): Promise<any> {
@@ -391,13 +426,33 @@ export async function restoreNotification(id: number): Promise<any> {
   });
 }
 
+// --- FRIENDS API ---
+export async function getFriends(): Promise<any[]> {
+  return request<any[]>('/friends');
+}
+
+export async function sendFriendRequest(phone_number: string): Promise<any> {
+  return request<any>('/friends/request', {
+    method: 'POST',
+    body: JSON.stringify({ phone_number })
+  });
+}
+
+export async function respondFriendRequest(request_id: string, action: 'accept' | 'reject'): Promise<any> {
+  return request<any>('/friends/respond', {
+    method: 'PUT',
+    body: JSON.stringify({ request_id, action })
+  });
+}
+
 // --- CHAT API ---
-export async function getChatMessages(isGroup: boolean, archive: boolean = false, receiverId?: string): Promise<any> {
-  const queryParams = new URLSearchParams();
-  queryParams.append('is_group', isGroup.toString());
-  queryParams.append('archive', archive.toString());
-  if (receiverId) queryParams.append('receiver_id', receiverId);
-  return request<any>(`/chat?${queryParams.toString()}`);
+export async function getChatMessages(isGroup: boolean, archive: boolean = false, receiverId?: string, params?: PaginationParams): Promise<PaginatedResponse<any>> {
+  const queryParams: any = { is_group: isGroup.toString(), archive: archive.toString(), ...params };
+  if (receiverId) {
+    queryParams.receiver_id = receiverId;
+  }
+  const query = new URLSearchParams(queryParams).toString();
+  return request<PaginatedResponse<any>>(`/chat?${query}`);
 }
 
 export async function sendChatMessage(content: string, isGroup: boolean, receiverId?: string): Promise<any> {
@@ -423,6 +478,10 @@ export async function loginUser(data: any): Promise<any> {
     method: 'POST',
     body: JSON.stringify(data)
   });
+}
+
+export async function getBadges(): Promise<{ chat: number, notifications: number, invoices: number, repairs: number }> {
+  return request<{ chat: number, notifications: number, invoices: number, repairs: number }>('/badges');
 }
 
 export async function loginGoogle(token: string): Promise<any> {

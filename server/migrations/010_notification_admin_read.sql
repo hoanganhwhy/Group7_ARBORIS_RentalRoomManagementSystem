@@ -1,0 +1,2 @@
+ALTER TABLE notifications ADD COLUMN is_read INTEGER DEFAULT 0;
+ALTER TABLE notifications ADD COLUMN read_at DATETIME;

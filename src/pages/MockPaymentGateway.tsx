@@ -1,12 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, CheckCircle2, Copy, Wallet, CreditCard, Loader2, AlertCircle, Clock } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useState, useEffect } from 'react';
+import { ArrowLeft, CheckCircle2, Copy, Loader2, AlertCircle, Clock } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { getInvoice, reportPayment } from '../lib/api';
 import type { Invoice } from '../types';
 
 export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: string; amount: number; onBack: () => void }) {
-  const { user } = useAuth();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [reporting, setReporting] = useState(false);
@@ -59,7 +57,7 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
       setReporting(true);
       await reportPayment(invoice.id);
       // Wait for the next poll to update UI, or just update locally:
-      setInvoice({ ...invoice, status: 'paid' });
+      setInvoice({ ...invoice, status: 'waiting_confirmation' });
     } catch (error) {
       alert('Có lỗi xảy ra khi báo cáo thanh toán');
       console.error(error);
@@ -173,6 +171,21 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
             </p>
           </div>
         )}
+
+
+        <Button
+          onClick={handleReportPayment}
+          disabled={reporting || !invoice?.qrUrl}
+          className="w-full mb-6 justify-center"
+          size="lg"
+        >
+          {reporting ? (
+            <Loader2 className="w-5 h-5 animate-spin mr-2" />
+          ) : (
+            <CheckCircle2 className="w-5 h-5 mr-2" />
+          )}
+          {reporting ? 'Đang gửi xác nhận...' : 'Tôi đã chuyển khoản thành công'}
+        </Button>
 
         <div className="bg-blue-50 text-blue-700 p-5 rounded-2xl text-sm leading-relaxed mb-6 border border-blue-100 shadow-sm">
           <p className="font-semibold mb-3 flex items-center gap-2">

@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { getNotifications, getNotificationDetail, sendNotification, replyNotification, getAdminUsers } from '../lib/api';
-import { useAuth } from '../context/AuthContext';
-import { Bell, Send, Users, User, MessageCircle, RefreshCw } from 'lucide-react';
+import { getNotificationDetail, sendNotification, replyNotification, getAdminUsers, markNotificationAsRead } from '../lib/api';
+import { Bell, Send, Users, User, RefreshCw } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { Input } from '../components/ui/Input';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
 
-export default function NotificationsAdmin() {
-  const { user } = useAuth();
+import { Page } from '../types';
+
+export default function NotificationsAdmin({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const [activeTab, setActiveTab] = useState<'personal' | 'all'>('personal');
   const [viewMode, setViewMode] = useState<'main' | 'archive'>('main');
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -24,24 +27,35 @@ export default function NotificationsAdmin() {
   const [recipients, setRecipients] = useState<any[]>([]);
   const [replyContent, setReplyContent] = useState('');
 
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [paginationInfo, setPaginationInfo] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
+  const [searchQuery, setSearchQuery] = useState('');
+
   useEffect(() => {
     loadNotifications();
     loadTenants();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     loadNotifications();
-  }, [viewMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, page, limit]);
 
   async function loadNotifications() {
     setLoading(true);
     try {
       const isArchive = viewMode === 'archive';
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}&page=${page}&limit=${limit}`, {
+        credentials: 'include'
       });
       if(res.ok) {
-         setNotifications(await res.json());
+        const result = await res.json();
+        setNotifications(result.data || []);
+        if (result.pagination) {
+          setPaginationInfo(result.pagination);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -52,7 +66,8 @@ export default function NotificationsAdmin() {
 
   async function loadTenants() {
     try {
-      const usersData = await getAdminUsers();
+      const usersRes = await getAdminUsers({ limit: 10000 });
+      const usersData = usersRes.data || [];
       setTenants(usersData.filter((u: any) => u.role === 'TENANT' && u.tenant_id));
     } catch (error) {
       console.error(error);
@@ -77,9 +92,20 @@ export default function NotificationsAdmin() {
     }
   }
 
-  async function openDetail(id: number) {
+  async function openDetail(n: any) {
     try {
-      const detail = await getNotificationDetail(id);
+      if (!n.is_read && n.target_type === 'ADMIN') {
+        await markNotificationAsRead(n.id);
+        setNotifications(prev => prev.map(notif => notif.id === n.id ? {...notif, is_read: 1} : notif));
+      }
+
+      if (n.action_url && onNavigate) {
+        const targetPage = n.action_url.replace('/', '') as Page;
+        onNavigate(targetPage);
+        return;
+      }
+
+      const detail = await getNotificationDetail(n.id);
       setDetailNotif(detail.notification);
       setReplies(detail.replies);
       setRecipients(detail.recipients);
@@ -94,7 +120,7 @@ export default function NotificationsAdmin() {
     try {
       await replyNotification(detailNotif.id, replyContent);
       setReplyContent('');
-      openDetail(detailNotif.id);
+      openDetail(detailNotif);
       loadNotifications();
     } catch (error: any) {
       alert(error.message || 'Lỗi khi gửi phản hồi');
@@ -107,10 +133,10 @@ export default function NotificationsAdmin() {
     try {
       await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        credentials: 'include'
       });
       loadNotifications();
-    } catch (error) {
+    } catch {
       alert('Lỗi khi xóa');
     }
   }
@@ -120,10 +146,10 @@ export default function NotificationsAdmin() {
     try {
       await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}/restore`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        credentials: 'include'
       });
       loadNotifications();
-    } catch (error) {
+    } catch {
       alert('Lỗi khi khôi phục');
     }
   }
@@ -144,6 +170,13 @@ export default function NotificationsAdmin() {
             <Send className="w-4 h-4" /> Soạn thông báo mới
           </Button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-4 mb-4">
+        <div className="w-64">
+          <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm thông báo..." />
+        </div>
+        <PageSizeSelector limit={limit} onLimitChange={(newLimit) => { setLimit(newLimit); setPage(1); }} />
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-charcoal-100 p-6">
@@ -180,7 +213,7 @@ export default function NotificationsAdmin() {
               <div 
                 key={n.id} 
                 className="flex flex-col md:flex-row items-start md:items-center justify-between p-4 border border-charcoal-100 rounded-xl hover:border-terra-300 transition-colors cursor-pointer"
-                onClick={() => openDetail(n.id)}
+                onClick={() => openDetail(n)}
               >
                 <div>
                   <div className="flex items-center gap-2 mb-1">
@@ -218,6 +251,19 @@ export default function NotificationsAdmin() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Pagination */}
+        {!loading && notifications.length > 0 && (
+          <div className="mt-4">
+            <Pagination
+              currentPage={page}
+              totalPages={paginationInfo.totalPages}
+              hasNextPage={paginationInfo.hasNextPage}
+              hasPreviousPage={paginationInfo.hasPreviousPage}
+              onPageChange={setPage}
+            />
           </div>
         )}
       </div>
