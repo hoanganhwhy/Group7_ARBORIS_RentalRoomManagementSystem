@@ -1,5 +1,29 @@
+export type AuthNextStep = 'DASHBOARD' | 'VERIFY_GOOGLE' | 'CHANGE_PASSWORD';
+
+export interface User {
+  id: string;
+  username: string;
+  role: 'ADMIN' | 'MANAGER' | 'LANDLORD' | 'TENANT' | 'GUEST';
+  tenant_id: string | null;
+  full_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  cccd?: string | null;
+  date_of_birth?: string | null;
+  address?: string | null;
+  createdByAdmin: boolean;
+  googleVerified: boolean;
+  googleVerifiedAt: string | null;
+  mustChangePassword: boolean;
+  passwordChangedAt: string | null;
+  onboardingCompleted: boolean;
+  accountStatus: 'ACTIVE' | 'LOCKED' | 'INACTIVE';
+  nextStep: AuthNextStep;
+}
+
 export interface Room {
   id: string;
+  area: string;
   room_number: string;
   floor: number;
   area_sqm: number;
@@ -7,6 +31,12 @@ export interface Room {
   status: 'available' | 'occupied' | 'maintenance';
   max_occupants: number;
   description: string | null;
+  address?: string | null;
+  distance_km?: number;
+  air_conditioner?: boolean;
+  washing_machine?: boolean;
+  furnished?: boolean;
+  balcony?: boolean;
   created_at: string;
   updated_at: string;
   current_tenant?: Tenant | null;
@@ -25,9 +55,6 @@ export interface Tenant {
   address: string | null;
   emergency_contact: string | null;
   notes: string | null;
-  username?: string | null;
-  password?: string | null;
-  google_email?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +93,8 @@ export interface MeterReading {
 
 export interface Invoice {
   id: string;
+  ma_hoa_don: string;
+  qrUrl?: string;
   room_id: string;
   tenant_id: string | null;
   meter_reading_id: string | null;
@@ -76,7 +105,7 @@ export interface Invoice {
   water_cost: number;
   other_fees: number;
   total_amount: number;
-  status: 'pending' | 'paid' | 'overdue';
+  status: 'pending' | 'paid' | 'overdue' | 'waiting_confirmation';
   due_date: string | null;
   paid_date: string | null;
   notes: string | null;
@@ -105,4 +134,27 @@ export interface RepairRequest {
   tenant?: Tenant;
 }
 
-export type Page = 'dashboard' | 'rooms' | 'tenants' | 'tenant-accounts' | 'meter-readings' | 'invoices' | 'repairs';
+export interface RoommateRequest {
+  id: number;
+  khach_thue_id?: number;
+  phong_id?: number;
+  tieu_de: string;
+  mo_ta: string | null;
+  gia_chia_se: number;
+  trang_thai?: 'open' | 'closed';
+  ngay_dang: string;
+  ngay_cap_nhat?: string;
+  // Bổ sung các trường từ JOIN query
+  so_phong?: string;
+  dien_tich?: number;
+  dieu_hoa?: number;
+  may_giat?: number;
+  noi_that?: number;
+  ban_cong?: number;
+  dia_chi?: string | null;
+  ten_nha_tro?: string | null;
+  ho_ten?: string;
+  so_dien_thoai?: string | null;
+}
+
+export type Page = 'dashboard' | 'rooms' | 'tenants' | 'user-management' | 'meter-readings' | 'invoices' | 'repairs' | 'roommates' | 'notifications' | 'chat';
