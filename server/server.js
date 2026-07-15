@@ -338,6 +338,7 @@ const mapTenant = (t) => {
     address: t.dia_chi,
     emergency_contact: t.lien_he_khan_cap,
     notes: t.ghi_chu,
+      username: t.username,
     created_at: t.ngay_tao,
     updated_at: t.ngay_cap_nhat
   };
@@ -899,19 +900,19 @@ app.get('/api/tenants', async (req, res) => {
     const params = [];
 
     if (search) {
-      whereClause = 'WHERE ho_ten LIKE ? OR so_dien_thoai LIKE ? OR so_cccd LIKE ?';
+      whereClause = 'WHERE khach_thue.ho_ten LIKE ? OR khach_thue.so_dien_thoai LIKE ? OR khach_thue.so_cccd LIKE ?';
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     const sortField = sortBy || 'ho_ten';
     const order = sortOrder === 'desc' ? 'DESC' : 'ASC';
     const allowedSortFields = ['ho_ten', 'so_dien_thoai', 'so_cccd'];
-    const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'ho_ten';
+    const safeSortField = allowedSortFields.includes(sortField) ? `khach_thue.${sortField}` : 'khach_thue.ho_ten';
 
     const countResult = await queryOne(`SELECT COUNT(*) as total FROM khach_thue ${whereClause}`, params);
     const totalItems = countResult.total;
 
-    const tenants = await query(`SELECT * FROM khach_thue ${whereClause} ORDER BY ${safeSortField} ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]);
+    const tenants = await query(`SELECT khach_thue.*, users.username FROM khach_thue LEFT JOIN users ON khach_thue.id = users.tenant_id ${whereClause} ORDER BY ${safeSortField} ${order} LIMIT ? OFFSET ?`, [...params, limit, offset]);
     
     res.json({
       data: tenants.map(mapTenant),
@@ -927,7 +928,7 @@ app.get('/api/tenants', async (req, res) => {
 
 app.get('/api/tenants/:id', async (req, res) => {
   try {
-    const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
+    const tenant = await queryOne('SELECT khach_thue.*, users.username FROM khach_thue LEFT JOIN users ON khach_thue.id = users.tenant_id WHERE khach_thue.id = ?', [req.params.id]);
     if (!tenant) {
       return res.status(404).json({ error: 'Tenant not found' });
     }
@@ -1001,7 +1002,7 @@ app.put('/api/tenants/:id', async (req, res) => {
       console.error('Failed to sync tenant update to user account:', e);
     }
 
-    const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
+    const tenant = await queryOne('SELECT khach_thue.*, users.username FROM khach_thue LEFT JOIN users ON khach_thue.id = users.tenant_id WHERE khach_thue.id = ?', [req.params.id]);
     res.json(mapTenant(tenant));
   } catch (error) {
     res.status(500).json({ error: error.message });
