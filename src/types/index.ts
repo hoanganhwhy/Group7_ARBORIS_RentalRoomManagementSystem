@@ -21,6 +21,7 @@ export interface Room {
   washing_machine?: boolean;
   furnished?: boolean;
   balcony?: boolean;
+  image_url?: string;
   created_at: string;
   updated_at: string;
   current_tenant?: Tenant | null;
@@ -141,4 +142,4 @@ export interface RoommateRequest {
   so_dien_thoai?: string | null;
 }
 
-export type Page = 'dashboard' | 'rooms' | 'tenants' | 'user-management' | 'meter-readings' | 'invoices' | 'repairs' | 'roommates' | 'notifications' | 'chat';
+export type Page = 'dashboard' | 'rooms' | 'tenants' | 'tenant-accounts' | 'user-management' | 'meter-readings' | 'invoices' | 'repairs' | 'roommates' | 'notifications' | 'chat';

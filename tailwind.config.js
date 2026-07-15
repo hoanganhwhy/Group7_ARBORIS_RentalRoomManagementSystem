@@ -5,9 +5,31 @@ export default {
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
+        serif: ['Playfair Display', 'serif'],
       },
       colors: {
-        // Warm terracotta/coral brand colors
+        // ARBORIS Premium Colors
+        wood: {
+          50: '#f5f0ec',
+          100: '#eadfd6',
+          200: '#d5bfaf',
+          300: '#c09f87',
+          400: '#ab8060',
+          500: '#8b5e3c', // Wood Brown (Main)
+          600: '#754f32',
+          700: '#5e3f28',
+          800: '#48301e',
+          900: '#322115',
+          950: '#1a110a',
+        },
+        cream: {
+          50: '#faf9f8',
+          100: '#f5f3f0', // Beige / Ivory
+          200: '#eae6df',
+          300: '#dfd8cf',
+          400: '#d4cabe',
+          500: '#c9bcae',
+        },
         terra: {
           50: '#fffbf7',
           100: '#fef3eb',
@@ -20,15 +42,6 @@ export default {
           800: '#8f402a',
           900: '#753725',
         },
-        // Warm neutrals
-        cream: {
-          50: '#fefdfb',
-          100: '#fdfaf5',
-          200: '#faf5eb',
-          300: '#f5ede0',
-          400: '#ebe0d0',
-        },
-        // Charcoal for text
         charcoal: {
           50: '#f6f6f6',
           100: '#e7e7e7',
@@ -42,54 +55,37 @@ export default {
           900: '#2b2b2b',
           950: '#1a1a1a',
         },
-        // Muted status colors
+        // Muted status colors adapted to premium theme
         sage: {
-          50: '#f6f9f6',
-          100: '#e3ebe3',
-          200: '#c7d9c7',
-          300: '#a3c1a3',
-          400: '#7ba37b',
-          500: '#5b855b',
-          600: '#486b48',
-          700: '#3c573c',
-          800: '#334633',
-          900: '#2b3a2b',
+          50: '#f4f6f4',
+          100: '#e4ebe4',
+          500: '#7ba37b',
+          600: '#5b855b',
         },
         amber: {
-          50: '#fffbeb',
-          100: '#fef3c7',
-          200: '#fde68a',
-          300: '#fcd34d',
-          400: '#fbbf24',
-          500: '#f59e0b',
-          600: '#d97706',
-          700: '#b45309',
-          800: '#92400e',
-          900: '#78350f',
+          50: '#fffbf0',
+          100: '#fdf0cd',
+          500: '#d9a05b',
+          600: '#bf8642',
         },
         rose: {
-          50: '#fff1f2',
-          100: '#ffe4e6',
-          200: '#fecdd3',
-          300: '#fda4af',
-          400: '#fb7185',
-          500: '#f43f5e',
-          600: '#e11d48',
-          700: '#be123c',
-          800: '#9f1239',
-          900: '#881337',
+          50: '#fdf3f4',
+          100: '#fae4e6',
+          500: '#c2767c',
+          600: '#a3575d',
         },
       },
       boxShadow: {
-        'soft': '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 4px 16px -4px rgba(0, 0, 0, 0.08)',
-        'card': '0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06)',
-        'card-hover': '0 4px 8px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.08)',
-        'elevated': '0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04)',
+        'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+        'card': '0 8px 30px rgba(0, 0, 0, 0.04)',
+        'card-hover': '0 12px 40px rgba(0, 0, 0, 0.08)',
+        'elevated': '0 20px 40px rgba(0, 0, 0, 0.1)',
       },
       borderRadius: {
         'xl': '14px',
         '2xl': '18px',
         '3xl': '24px',
+        '4xl': '32px',
       },
     },
   },

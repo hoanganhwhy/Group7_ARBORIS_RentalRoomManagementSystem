@@ -23,11 +23,42 @@ export interface PaginatedResponse<T> {
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers = {
+export function getImageUrl(path: string): string | null {
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  return 'http://localhost:5000' + path;
+}
+
+function buildQueryString(params: any): string {
+  if (!params) return '';
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      searchParams.append(key, value as string);
+    }
+  });
+  const qs = searchParams.toString();
+  return qs ? `?${qs}` : '';
+}
+
+function getHeaders(): Record<string, string> {
+  const token = localStorage.getItem('token');
+  return {
     'Content-Type': 'application/json',
-    ...(options.headers || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const defaultHeaders = getHeaders();
+  const headers: Record<string, string> = {
+    ...defaultHeaders,
+    ...(options.headers as Record<string, string> || {}),
+  };
+  
+  if (options.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
   
   const response = await fetch(`${BASE_URL}${path}`, {
     ...options,
@@ -49,7 +80,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 // Rooms API
 export async function getRooms(params?: PaginationParams): Promise<PaginatedResponse<Room>> {
-  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  const query = buildQueryString(params);
   return request<PaginatedResponse<Room>>(`/rooms${query}`);
 }
 
@@ -57,17 +88,17 @@ export async function getRoom(id: string): Promise<Room | null> {
   return request<Room>(`/rooms/${id}`);
 }
 
-export async function createRoom(room: Partial<Room>): Promise<Room> {
+export async function createRoom(room: Partial<Room> | FormData): Promise<Room> {
   return request<Room>('/rooms', {
     method: 'POST',
-    body: JSON.stringify(room),
+    body: room instanceof FormData ? room : JSON.stringify(room),
   });
 }
 
-export async function updateRoom(id: string, room: Partial<Room>): Promise<Room> {
+export async function updateRoom(id: string, room: Partial<Room> | FormData): Promise<Room> {
   return request<Room>(`/rooms/${id}`, {
     method: 'PUT',
-    body: JSON.stringify(room),
+    body: room instanceof FormData ? room : JSON.stringify(room),
   });
 }
 
@@ -79,7 +110,7 @@ export async function deleteRoom(id: string): Promise<void> {
 
 // Users API
 export async function getAdminUsers(params?: PaginationParams): Promise<PaginatedResponse<any>> {
-  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  const query = buildQueryString(params);
   return request<PaginatedResponse<any>>(`/admin/users${query}`);
 }
 
@@ -100,7 +131,7 @@ export async function sendAiMessage(message: string, role: string, tenantId?: st
 
 // Tenants API
 export async function getTenants(params?: PaginationParams): Promise<PaginatedResponse<Tenant>> {
-  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  const query = buildQueryString(params);
   return request<PaginatedResponse<Tenant>>(`/tenants${query}`);
 }
 
@@ -178,7 +209,7 @@ export async function getExpiringContracts(withinDays: number = 30): Promise<Roo
 
 // Meter Readings API
 export async function getMeterReadings(params?: PaginationParams): Promise<PaginatedResponse<MeterReading>> {
-  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  const query = buildQueryString(params);
   return request<PaginatedResponse<MeterReading>>(`/meter_readings${query}`);
 }
 
@@ -212,7 +243,7 @@ export async function deleteMeterReading(id: string): Promise<void> {
 
 // Invoices API
 export async function getInvoices(params?: PaginationParams): Promise<PaginatedResponse<Invoice>> {
-  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  const query = buildQueryString(params);
   return request<PaginatedResponse<Invoice>>(`/invoices${query}`);
 }
 
@@ -254,7 +285,7 @@ export async function markInvoicePaid(id: string): Promise<Invoice> {
 
 // Repair Requests API
 export async function getRepairRequests(params?: PaginationParams): Promise<PaginatedResponse<RepairRequest>> {
-  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  const query = buildQueryString(params);
   return request<PaginatedResponse<RepairRequest>>(`/repair_requests${query}`);
 }
 
@@ -477,6 +508,13 @@ export async function loginUser(data: any): Promise<any> {
   return request<any>('/auth/login', {
     method: 'POST',
     body: JSON.stringify(data)
+  });
+}
+
+export async function changePassword(oldPassword: string, newPassword: string): Promise<any> {
+  return request<any>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ oldPassword, newPassword })
   });
 }
 

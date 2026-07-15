@@ -47,7 +47,7 @@ export default function NotificationsAdmin({ onNavigate }: { onNavigate?: (page:
     setLoading(true);
     try {
       const isArchive = viewMode === 'archive';
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}&page=${page}&limit=${limit}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/notifications/my?archive=${isArchive}&page=${page}&limit=${limit}`, {
         credentials: 'include'
       });
       if(res.ok) {
@@ -131,7 +131,7 @@ export default function NotificationsAdmin({ onNavigate }: { onNavigate?: (page:
     e.stopPropagation();
     if (!confirm('Xóa thông báo này vào mục lưu trữ?')) return;
     try {
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}`, {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/notifications/${id}`, {
         method: 'DELETE',
         credentials: 'include'
       });
@@ -144,7 +144,7 @@ export default function NotificationsAdmin({ onNavigate }: { onNavigate?: (page:
   async function handleRestore(e: React.MouseEvent, id: number) {
     e.stopPropagation();
     try {
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}/restore`, {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/notifications/${id}/restore`, {
         method: 'PATCH',
         credentials: 'include'
       });
@@ -158,11 +158,11 @@ export default function NotificationsAdmin({ onNavigate }: { onNavigate?: (page:
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-charcoal-900 flex items-center gap-2">
+          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">
             <Bell className="w-6 h-6 text-terra-500" />
             Trung tâm Thông báo
           </h1>
-          <p className="text-charcoal-500 mt-1 text-sm">Gửi và quản lý thông báo cho khách thuê</p>
+          <p className="text-charcoal-400 mt-2 text-sm">Gửi và quản lý thông báo cho khách thuê</p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={loadNotifications}><RefreshCw className="w-4 h-4" /></Button>

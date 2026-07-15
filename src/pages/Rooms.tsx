@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Plus,
   DoorOpen,
@@ -26,6 +26,7 @@ import {
   setPrimaryTenant,
   getExpiringContracts,
   extendContract,
+  getImageUrl,
 } from '../lib/api';
 import type { Room, Tenant, RoomAssignment } from '../types';
 import { AlertTriangle, CalendarDays, RefreshCw, LayoutGrid, List as ListIcon, FileText } from 'lucide-react';
@@ -90,6 +91,9 @@ export function Rooms() {
     notes: '',
   });
   const [saving, setSaving] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const availableAreas = Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort();
 
@@ -142,12 +146,16 @@ export function Rooms() {
 
   function openCreateModal() {
     setEditingRoom(null);
+    setImageFile(null);
+    setRemoveImage(false);
     setFormData({ area: '', room_number: '', floor: '', area_sqm: '', monthly_rent: '', max_occupants: '', status: 'available', description: '', air_conditioner: false, washing_machine: false, furnished: false, balcony: false });
     setIsModalOpen(true);
   }
 
   function openEditModal(room: Room) {
     setEditingRoom(room);
+    setImageFile(null);
+    setRemoveImage(false);
     setFormData({
       area: room.area,
       room_number: room.room_number,
@@ -270,17 +278,29 @@ export function Rooms() {
     setSaving(true);
     try {
       const payload = {
-        ...formData,
-        floor: parseInt(formData.floor as any) || 1,
-        max_occupants: parseInt(formData.max_occupants as any) || 1,
-        area_sqm: parseFloat(formData.area_sqm as any) || 0,
-        monthly_rent: parseFloat(formData.monthly_rent as any) || 0,
-      };
-      if (editingRoom) {
-        await updateRoom(editingRoom.id, payload);
-      } else {
-        await createRoom(payload);
-      }
+          ...formData,
+          floor: parseInt(formData.floor as any) || 1,
+          max_occupants: parseInt(formData.max_occupants as any) || 1,
+          area_sqm: parseFloat(formData.area_sqm as any) || 0,
+          monthly_rent: parseFloat(formData.monthly_rent as any) || 0,
+        };
+        
+        const formDataPayload = new FormData();
+        Object.entries(payload).forEach(([key, value]) => {
+          formDataPayload.append(key, value as string);
+        });
+        if (imageFile) {
+          formDataPayload.append('image', imageFile);
+        }
+        if (removeImage) {
+          formDataPayload.append('remove_image', 'true');
+        }
+
+        if (editingRoom) {
+          await updateRoom(editingRoom.id, formDataPayload as any);
+        } else {
+          await createRoom(formDataPayload as any);
+        }
       await loadData();
       setIsModalOpen(false);
     } catch (error) {
@@ -836,7 +856,62 @@ export function Rooms() {
             </div>
           </div>
 
-          <Input label="Ghi chú" name="description" type="textarea" value={formData.description} onChange={(v) => setFormData({ ...formData, description: v })} placeholder="Mô tả thêm về phòng..." rows={2} />
+                      <div className="space-y-2 col-span-2">
+              <label className="text-sm font-medium text-charcoal-700">Ảnh phòng</label>
+
+              <button
+                type="button"
+                className="room-image-selector"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <img 
+                  src={imageFile ? URL.createObjectURL(imageFile) : (editingRoom?.image_url && !removeImage ? getImageUrl(editingRoom.image_url) : "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&q=80")} 
+                  alt="Ảnh phòng" 
+                />
+
+                <div className="change-image-overlay">
+                  <span>📷</span>
+                  <strong>Thay ảnh</strong>
+                </div>
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  
+                  const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+                  if (!allowedTypes.includes(file.type)) {
+                    alert("Chỉ được chọn ảnh JPG, PNG hoặc WEBP");
+                    e.target.value = "";
+                    return;
+                  }
+              
+                  if (file.size > 5 * 1024 * 1024) {
+                    alert("Ảnh không được lớn hơn 5MB");
+                    e.target.value = "";
+                    return;
+                  }
+              
+                  setImageFile(file);
+                  setRemoveImage(false);
+                }}
+                className="hidden"
+                style={{ display: 'none' }}
+              />
+
+              <p className="image-help">
+                Bấm vào ảnh để chọn ảnh khác. Tối đa 5MB.
+              </p>
+              {editingRoom?.image_url && !removeImage && !imageFile && (
+                <button type="button" onClick={() => setRemoveImage(true)} className="text-rose-600 text-sm mt-1">Xóa ảnh hiện tại</button>
+              )}
+            </div>
+            
+            <Input label="Ghi chú" name="description" type="textarea" value={formData.description} onChange={(v) => setFormData({ ...formData, description: v })} placeholder="Mô tả thêm về phòng..." rows={2} />
           <div className="flex gap-3 pt-5 border-t border-charcoal-100">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Hủy</Button>
             <Button type="submit" disabled={saving}>{saving ? 'Đang lưu...' : editingRoom ? 'Cập nhật' : 'Thêm mới'}</Button>
@@ -961,30 +1036,32 @@ function PropertyCard({
   return (
     <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card hover:shadow-card-hover transition-all duration-300 overflow-hidden">
       {/* Header — clickable to view detail */}
-      <div
-        onClick={onView}
-        className={`${config.bg} px-6 py-5 border-b border-charcoal-100 cursor-pointer hover:brightness-[0.97] transition-all`}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${config.iconBg}`}>
-              <DoorOpen className="w-5 h-5" />
-            </div>
+        <div onClick={onView} className="room-card-image cursor-pointer hover:brightness-[0.97] transition-all">
+          <img
+            src={room.image_url ? getImageUrl(room.image_url) : "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&q=80"}
+            alt={`Phòng ${room.room_number}`}
+          />
+
+          <div className="room-card-overlay">
             <div>
-              <h3 className="text-xl font-semibold text-charcoal-900 truncate max-w-[150px]" title={`${room.area} - P.${room.room_number}`}>{room.area} - P.{room.room_number}</h3>
-              <p className="text-sm text-charcoal-400">Tầng {room.floor}</p>
+              <div className="room-location">⌖ {room.area}</div>
+              <div className="room-number truncate">P.{room.room_number}</div>
+              <div className="room-owner truncate">{room.active_assignments?.find(a => a.is_primary)?.tenant?.full_name || room.active_assignments?.[0]?.tenant?.full_name || 'Khách thuê'}</div>
+            </div>
+
+            <div className="room-rent">
+              <strong>
+                {Number(room.monthly_rent || 0).toLocaleString("vi-VN")}đ
+              </strong>
+              <span>GIÁ THUÊ / THÁNG</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <Badge status={room.status} variant={config.variant} size="sm" />
-            <div className="w-7 h-7 rounded-lg bg-white/60 flex items-center justify-center">
-              <Info className="w-3.5 h-3.5 text-charcoal-400" />
-            </div>
           </div>
         </div>
-      </div>
 
-      {/* Body */}
+        {/* Body */}
       <div className="px-6 py-5 space-y-4">
         {/* Key Info */}
         <div className="grid grid-cols-2 gap-4">

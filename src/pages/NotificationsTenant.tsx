@@ -1,52 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { getNotificationDetail, replyNotification, markNotificationAsRead } from '../lib/api';
-import { Bell, Send, CheckCircle2, Circle } from 'lucide-react';
-import { Button } from '../components/ui/Button';
-import { Modal } from '../components/ui/Modal';
-import { Pagination } from '../components/common/Pagination';
-import { PageSizeSelector } from '../components/common/PageSizeSelector';
-
+import { markNotificationAsRead } from '../lib/api';
+import { Bell, CheckCircle2, Circle, Wrench, DollarSign, FileText, Users, ArrowRight } from 'lucide-react';
 import { Page } from '../types';
 
 export default function NotificationsTenant({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'main' | 'archive'>('main');
-  
-  // Detail modal
-  const [detailNotif, setDetailNotif] = useState<any>(null);
-  const [replies, setReplies] = useState<any[]>([]);
-  const [replyContent, setReplyContent] = useState('');
-
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
-  const [paginationInfo, setPaginationInfo] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
 
   useEffect(() => {
     loadNotifications();
-    
-    // Polling every 10 seconds
     const interval = setInterval(() => {
       loadNotifications(false);
     }, 10000);
-    
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, page, limit]);
+  }, []);
 
   async function loadNotifications(showLoading = true) {
     if (showLoading) setLoading(true);
     try {
-      const isArchive = viewMode === 'archive';
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}&page=${page}&limit=${limit}`, {
+      // Always fetch main notifications without pagination limits
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/notifications/my?archive=false&limit=100`, {
         credentials: 'include'
       });
       if(res.ok) {
         const result = await res.json();
         setNotifications(result.data || []);
-        if (result.pagination) {
-          setPaginationInfo(result.pagination);
-        }
       }
     } catch (error) {
       console.error(error);
@@ -55,221 +33,118 @@ export default function NotificationsTenant({ onNavigate }: { onNavigate?: (page
     }
   }
 
-  async function openDetail(n: any) {
+  async function handleMarkAsRead(n: any) {
+    if (n.is_read) return;
     try {
-      if (!n.is_read) {
-        await markNotificationAsRead(n.id);
-        // Optimistically mark as read
-        setNotifications(prev => prev.map(notif => notif.id === n.id ? {...notif, is_read: 1} : notif));
-      }
-
-      if (n.action_url && onNavigate) {
-        const targetPage = n.action_url.replace('/', '') as Page;
-        onNavigate(targetPage);
-        return; // Do not open detail modal if it's a navigational notification
-      }
-
-      const detail = await getNotificationDetail(n.id);
-      setDetailNotif(detail.notification);
-      setReplies(detail.replies);
+      await markNotificationAsRead(n.id);
+      setNotifications(prev => prev.map(notif => notif.id === n.id ? {...notif, is_read: 1} : notif));
     } catch (error) {
       console.error(error);
     }
   }
 
-  async function handleReply(e: React.FormEvent) {
-    e.preventDefault();
-    if (!detailNotif || !replyContent.trim()) return;
-    try {
-      await replyNotification(detailNotif.id, replyContent);
-      setReplyContent('');
-      openDetail(detailNotif); // Reload replies
-      loadNotifications(false); // Update list counts
-    } catch (error: any) {
-      alert(error.message || 'Lỗi khi gửi phản hồi');
-    }
-  }
-
-  async function handleDelete(e: React.MouseEvent, id: number) {
-    e.stopPropagation();
-    if (!confirm('Xóa thông báo này vào mục lưu trữ?')) return;
-    try {
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}`, {
-        method: 'DELETE',
-        credentials: 'include'
-      });
-      loadNotifications();
-    } catch {
-      alert('Lỗi khi xóa');
-    }
-  }
-
-  async function handleRestore(e: React.MouseEvent, id: number) {
-    e.stopPropagation();
-    try {
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}/restore`, {
-        method: 'PATCH',
-        credentials: 'include'
-      });
-      loadNotifications();
-    } catch {
-      alert('Lỗi khi khôi phục');
-    }
-  }
+  const getStyle = (title: string, type: string) => {
+    const t = (title || '').toLowerCase();
+    if (t.includes('sửa chữa') || type === 'repair') return { icon: Wrench, color: 'text-wood-600', bg: 'bg-wood-100', border: 'border-wood-200' };
+    if (t.includes('tiền') || t.includes('hóa đơn') || type === 'invoice' || type === 'payment') return { icon: DollarSign, color: 'text-rose-600', bg: 'bg-rose-100', border: 'border-rose-200' };
+    if (t.includes('hợp đồng') || type === 'contract') return { icon: FileText, color: 'text-amber-600', bg: 'bg-amber-100', border: 'border-amber-200' };
+    if (t.includes('người') || type === 'tenant') return { icon: Users, color: 'text-sage-600', bg: 'bg-sage-100', border: 'border-sage-200' };
+    return { icon: Bell, color: 'text-charcoal-500', bg: 'bg-charcoal-100', border: 'border-charcoal-200' };
+  };
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-12 h-12 bg-terra-100 rounded-full flex items-center justify-center text-terra-600">
-          <Bell className="w-6 h-6" />
-        </div>
+    <div className="space-y-10">
+      {/* Header */}
+      <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-charcoal-900">Thông báo của bạn</h1>
-          <p className="text-charcoal-500">Xem và phản hồi thông báo từ chủ trọ</p>
+          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">
+            Thông báo
+          </h1>
+          <p className="text-charcoal-400 mt-2 text-sm">Xem các cập nhật mới nhất từ hệ thống và chủ trọ</p>
         </div>
-      </div>
+      </header>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-charcoal-100 overflow-hidden">
-        <div className="flex items-center gap-4 border-b border-charcoal-100 px-6 pt-4">
-          <button 
-            onClick={() => setViewMode('main')}
-            className={`pb-3 px-1 font-medium text-sm transition-colors relative ${viewMode === 'main' ? 'text-terra-600' : 'text-charcoal-500 hover:text-charcoal-800'}`}
-          >
-            Hộp thư (Tối đa 99 tin)
-            {viewMode === 'main' && <span className="absolute bottom-0 left-0 w-full h-0.5 bg-terra-500 rounded-t-full"></span>}
-          </button>
-          <button 
-            onClick={() => setViewMode('archive')}
-            className={`pb-3 px-1 font-medium text-sm transition-colors relative ${viewMode === 'archive' ? 'text-terra-600' : 'text-charcoal-500 hover:text-charcoal-800'}`}
-          >
-            Lưu trữ (30 ngày)
-            {viewMode === 'archive' && <span className="absolute bottom-0 left-0 w-full h-0.5 bg-terra-500 rounded-t-full"></span>}
-          </button>
-        </div>
-        <div className="flex items-center gap-3 px-6 py-3 border-b border-charcoal-100">
-          <PageSizeSelector limit={limit} onLimitChange={(newLimit) => { setLimit(newLimit); setPage(1); }} />
-        </div>
+      {/* Main Content */}
+      <div className="space-y-6">
         {loading ? (
-          <p className="text-charcoal-500 p-6 text-center">Đang tải thông báo...</p>
-        ) : notifications.length === 0 ? (
-          <div className="text-center py-16 px-4 bg-charcoal-50">
-            <Bell className="w-12 h-12 text-charcoal-300 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-charcoal-900">Bạn không có thông báo nào</h3>
-            <p className="text-charcoal-500 mt-1">Khi chủ trọ gửi thông báo, nó sẽ xuất hiện ở đây.</p>
+          <div className="flex justify-center py-20">
+            <div className="w-8 h-8 border-4 border-charcoal-200 border-t-charcoal-900 rounded-full animate-spin"></div>
           </div>
-        ) : (
-          <div className="divide-y divide-charcoal-100">
-            {notifications.map(n => (
-              <div 
-                key={n.id} 
-                className={`flex items-start gap-4 p-5 cursor-pointer transition-colors hover:bg-charcoal-50 ${!n.is_read ? 'bg-terra-50/30' : ''}`}
-                onClick={() => openDetail(n)}
-              >
-                <div className="mt-1">
-                  {n.is_read ? (
-                    <CheckCircle2 className="w-5 h-5 text-charcoal-300" />
-                  ) : (
-                    <Circle className="w-5 h-5 text-terra-500 fill-terra-500" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className={`font-medium truncate ${!n.is_read ? 'text-charcoal-900 font-semibold' : 'text-charcoal-700'}`}>
-                      {n.title}
-                    </h3>
-                    <div className="flex items-center gap-4">
-                      <span className="text-xs text-charcoal-400 whitespace-nowrap ml-4">
-                        {new Date(n.created_at).toLocaleDateString('vi-VN')}
-                      </span>
-                      {viewMode === 'main' ? (
-                        <button onClick={(e) => handleDelete(e, n.id)} className="text-xs text-red-500 hover:underline">Xóa</button>
-                      ) : (
-                        <button onClick={(e) => handleRestore(e, n.id)} className="text-xs text-terra-600 hover:underline">Khôi phục</button>
-                      )}
-                    </div>
-                  </div>
-                  <p className={`text-sm line-clamp-2 ${!n.is_read ? 'text-charcoal-800' : 'text-charcoal-500'}`}>
-                    {n.content}
-                  </p>
-                  
-                  {n.reply_count > 0 && (
-                    <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-terra-600 bg-terra-50 px-2 py-1 rounded-md">
-                      <Send className="w-3 h-3" />
-                      Đã có {n.reply_count} tin nhắn trong hội thoại
-                    </div>
-                  )}
+        ) : notifications.length === 0 ? (
+          <div className="relative overflow-hidden rounded-[2rem] border border-white/60 py-24 px-8 text-center shadow-[0_8px_30px_rgb(0,0,0,0.06)] bg-white/60 backdrop-blur-xl">
+            {/* Decorative background blobs */}
+            <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none opacity-60">
+              <div className="absolute -top-24 -right-24 w-96 h-96 bg-terra-100/80 rounded-full mix-blend-multiply filter blur-3xl"></div>
+              <div className="absolute top-24 -left-24 w-96 h-96 bg-wood-100/80 rounded-full mix-blend-multiply filter blur-3xl"></div>
+              <div className="absolute -bottom-24 left-1/2 -translate-x-1/2 w-96 h-96 bg-sage-100/80 rounded-full mix-blend-multiply filter blur-3xl"></div>
+            </div>
+            
+            <div className="relative z-10 flex flex-col items-center">
+              <div className="w-28 h-28 bg-white/80 backdrop-blur-md rounded-full flex items-center justify-center mb-8 shadow-2xl shadow-terra-500/10 border border-white/80">
+                <div className="w-20 h-20 bg-gradient-to-tr from-terra-50 to-wood-50 rounded-full flex items-center justify-center border border-terra-100/50">
+                  <Bell className="w-9 h-9 text-terra-600/80" />
                 </div>
               </div>
-            ))}
+              <h3 className="text-3xl font-serif text-charcoal-900 mb-4 tracking-tight">Chưa có thông báo nào</h3>
+              <p className="text-charcoal-500 text-lg max-w-md mx-auto leading-relaxed">
+                Khi có hóa đơn mới, nhắc nhở hợp đồng hay cập nhật sửa chữa, hệ thống sẽ báo ngay cho bạn tại đây.
+              </p>
+            </div>
           </div>
-        )}
+        ) : (
+          <div className="grid gap-4">
+            {notifications.map(n => {
+              const style = getStyle(n.title, n.notification_type || '');
+              const Icon = style.icon;
+              return (
+                <div 
+                  key={n.id}
+                  onClick={() => {
+                    handleMarkAsRead(n);
+                    if (n.action_url && onNavigate) {
+                      onNavigate(n.action_url.replace('/', '') as Page);
+                    }
+                  }}
+                  className={`group relative bg-white/80 backdrop-blur-xl rounded-[1.5rem] border ${n.is_read ? 'border-white' : style.border} p-6 shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer overflow-hidden ${!n.is_read ? 'shadow-[0_8px_30px_rgb(0,0,0,0.04)]' : ''}`}
+                >
+                  {/* Unread indicator bar */}
+                  {!n.is_read && (
+                    <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${style.bg.replace('bg-', 'bg-').replace('100', '400')}`} />
+                  )}
+                  
+                  <div className="flex gap-5">
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${n.is_read ? 'bg-charcoal-50 text-charcoal-300' : `${style.bg} ${style.color}`}`}>
+                      <Icon className="w-6 h-6" />
+                    </div>
+                    
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <div className="flex items-start justify-between gap-4 mb-1">
+                        <h3 className={`text-lg font-serif tracking-tight truncate ${n.is_read ? 'text-charcoal-500' : 'text-charcoal-900'}`}>
+                          {n.title}
+                        </h3>
+                        <span className="text-[11px] font-medium text-charcoal-400 uppercase tracking-wider shrink-0 mt-1">
+                          {new Date(n.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                        </span>
+                      </div>
+                      <p className={`text-sm leading-relaxed line-clamp-2 ${n.is_read ? 'text-charcoal-400' : 'text-charcoal-600'}`}>
+                        {n.content}
+                      </p>
+                    </div>
 
-        {/* Pagination */}
-        {!loading && notifications.length > 0 && (
-          <div className="p-4 border-t border-charcoal-100">
-            <Pagination
-              currentPage={page}
-              totalPages={paginationInfo.totalPages}
-              hasNextPage={paginationInfo.hasNextPage}
-              hasPreviousPage={paginationInfo.hasPreviousPage}
-              onPageChange={setPage}
-            />
+                    {n.action_url && (
+                      <div className="flex flex-col items-end justify-center shrink-0 ml-4">
+                        <div className="w-8 h-8 flex items-center justify-center rounded-full bg-charcoal-50 text-charcoal-400 group-hover:bg-charcoal-900 group-hover:text-white transition-all">
+                          <ArrowRight className="w-4 h-4" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
-
-      <Modal isOpen={!!detailNotif} onClose={() => setDetailNotif(null)} title={detailNotif?.title || 'Thông báo'}>
-        {detailNotif && (
-          <div className="flex flex-col h-[80vh] md:h-[600px] overflow-hidden">
-            <div className="p-5 bg-gradient-to-br from-charcoal-50 to-white border-b border-charcoal-100">
-              <span className="text-xs font-medium text-charcoal-500 mb-2 block uppercase tracking-wider">
-                Chủ trọ gửi lúc {new Date(detailNotif.created_at).toLocaleString('vi-VN')}
-              </span>
-              <p className="text-charcoal-900 whitespace-pre-wrap leading-relaxed">{detailNotif.content}</p>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
-              {replies.length === 0 ? (
-                <div className="text-center text-charcoal-400 py-10 text-sm">
-                  Bạn có thể gửi câu hỏi hoặc phản hồi lại thông báo này.
-                </div>
-              ) : (
-                replies.map(r => (
-                  <div key={r.id} className={`flex ${r.sender_role === 'tenant' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] rounded-2xl p-3.5 ${
-                      r.sender_role === 'tenant' 
-                        ? 'bg-terra-500 text-white rounded-br-sm shadow-sm' 
-                        : 'bg-charcoal-100 text-charcoal-900 rounded-bl-sm'
-                    }`}>
-                      <div className="text-[11px] opacity-75 mb-1.5 flex justify-between gap-4">
-                        <span className="font-medium">{r.sender_role === 'tenant' ? 'Bạn' : 'Chủ trọ'}</span>
-                        <span>{new Date(r.created_at).toLocaleTimeString('vi-VN', {hour: '2-digit', minute: '2-digit'})}</span>
-                      </div>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{r.content}</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="p-4 border-t border-charcoal-100 bg-white shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
-              <form onSubmit={handleReply} className="flex gap-2">
-                <input
-                  type="text"
-                  className="flex-1 border border-charcoal-200 bg-charcoal-50 rounded-full px-5 py-2.5 text-sm focus:bg-white focus:ring-2 focus:ring-terra-500 focus:border-terra-500 focus:outline-none transition-all"
-                  placeholder="Gửi phản hồi cho chủ trọ..."
-                  value={replyContent}
-                  onChange={e => setReplyContent(e.target.value)}
-                />
-                <Button type="submit" disabled={!replyContent.trim()} className="rounded-full w-11 h-11 p-0 flex items-center justify-center shrink-0">
-                  <Send className="w-5 h-5 ml-0.5" />
-                </Button>
-              </form>
-            </div>
-          </div>
-        )}
-      </Modal>
-
     </div>
   );
 }

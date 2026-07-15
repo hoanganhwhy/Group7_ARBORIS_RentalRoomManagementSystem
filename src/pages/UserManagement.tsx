@@ -86,8 +86,8 @@ export function UserManagement() {
     <div className="space-y-10">
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-charcoal-900 tracking-tight">Tài khoản</h1>
-          <p className="text-charcoal-400 mt-2 text-base">Cấp tài khoản đăng nhập cho Khách thuê. Khách sẽ tự cập nhật thông tin cá nhân khi đăng nhập.</p>
+          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Tài khoản</h1>
+          <p className="text-charcoal-400 mt-2 text-sm">Cấp tài khoản đăng nhập cho Khách thuê. Khách sẽ tự cập nhật thông tin cá nhân khi đăng nhập.</p>
         </div>
         <Button onClick={() => handleOpenCreateModal()}>
           <UserPlus className="w-4 h-4 mr-2" />

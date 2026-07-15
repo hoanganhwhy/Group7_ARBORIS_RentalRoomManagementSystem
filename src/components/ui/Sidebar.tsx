@@ -1,26 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  LayoutDashboard,
-  DoorOpen,
-  Users,
-  Zap,
-  FileText,
-  Wrench,
-  Building2,
-  Settings as SettingsIcon,
-  LogOut,
-  UserPlus,
-  HeartHandshake,
-  Bell,
-  MessageCircle,
-  LogOut as LogOutIcon, // Rename to avoid conflict if needed, but LogOut is fine
-} from 'lucide-react';
+  PiGridFourLight,
+  PiReceiptLight,
+  PiWrenchLight,
+  PiBellLight,
+  PiChatCircleLight,
+  PiArmchairLight,
+  PiUsersLight,
+  PiIdentificationBadgeLight,
+  PiLightningLight,
+} from 'react-icons/pi';
+import { LogOut } from 'lucide-react';
 import type { Page } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { ProfileModal } from './ProfileModal';
 import { getBadges } from '../../lib/api';
 import { useSocket } from '../../hooks/useSocket';
-import { useEffect } from 'react';
 
 interface SidebarProps {
   currentPage: Page;
@@ -68,42 +63,35 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   
   if (user?.role === 'TENANT') {
     navItems = [
-      { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Thông tin thuê' },
-      { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán', badge: badges.invoices },
-      { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì', badge: badges.repairs },
-      { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Tin nhắn từ chủ trọ', badge: badges.notifications },
-      { id: 'chat', label: 'Tin nhắn', icon: <MessageCircle className="w-[18px] h-[18px]" />, description: 'Chat với chủ nhà', badge: badges.chat },
+      { id: 'dashboard', label: 'Tổng quan', description: 'Xem nhanh hoạt động', icon: <PiGridFourLight className="w-5 h-5" /> },
+      { id: 'invoices', label: 'Hóa đơn', description: 'Thanh toán', icon: <PiReceiptLight className="w-5 h-5" />, badge: badges.invoices },
+      { id: 'repairs', label: 'Sửa chữa', description: 'Yêu cầu bảo trì', icon: <PiWrenchLight className="w-5 h-5" />, badge: badges.repairs },
+      { id: 'notifications', label: 'Thông báo', description: 'Cập nhật mới', icon: <PiBellLight className="w-5 h-5" />, badge: badges.notifications },
     ];
   } else if (user?.role === 'ADMIN') {
     navItems = [
-      { id: 'dashboard', label: 'Tổng quan', icon: <LayoutDashboard className="w-[18px] h-[18px]" />, description: 'Xem nhanh hoạt động' },
-      { id: 'rooms', label: 'Phòng trọ', icon: <DoorOpen className="w-[18px] h-[18px]" />, description: 'Quản lý phòng' },
-      { id: 'tenants', label: 'Khách thuê', icon: <Users className="w-[18px] h-[18px]" />, description: 'Đang thuê phòng' },
-      { id: 'user-management', label: 'Tài khoản', icon: <UserPlus className="w-[18px] h-[18px]" />, description: 'Cấp quyền truy cập' },
-      { id: 'meter-readings', label: 'Điện nước', icon: <Zap className="w-[18px] h-[18px]" />, description: 'Chỉ số tiêu thụ' },
-      { id: 'invoices', label: 'Hóa đơn', icon: <FileText className="w-[18px] h-[18px]" />, description: 'Thanh toán', badge: badges.invoices },
-      { id: 'repairs', label: 'Sửa chữa', icon: <Wrench className="w-[18px] h-[18px]" />, description: 'Yêu cầu bảo trì', badge: badges.repairs },
-      { id: 'notifications', label: 'Thông báo', icon: <Bell className="w-[18px] h-[18px]" />, description: 'Gửi và phản hồi', badge: badges.notifications },
-      { id: 'chat', label: 'Tin nhắn', icon: <MessageCircle className="w-[18px] h-[18px]" />, description: 'Nhắn tin', badge: badges.chat },
+      { id: 'dashboard', label: 'Tổng quan', description: 'Xem nhanh hoạt động', icon: <PiGridFourLight className="w-5 h-5" /> },
+      { id: 'rooms', label: 'Phòng trọ', description: 'Quản lý phòng', icon: <PiArmchairLight className="w-5 h-5" /> },
+      { id: 'tenants', label: 'Người thuê', description: 'Thông tin thuê', icon: <PiUsersLight className="w-5 h-5" /> },
+      { id: 'tenant-accounts', label: 'Tài khoản KH', description: 'Quản lý tài khoản', icon: <PiIdentificationBadgeLight className="w-5 h-5" /> },
+      { id: 'user-management', label: 'Phân quyền', description: 'Quản lý Admin', icon: <PiIdentificationBadgeLight className="w-5 h-5" /> },
+      { id: 'meter-readings', label: 'Điện nước', description: 'Chỉ số tiêu thụ', icon: <PiLightningLight className="w-5 h-5" /> },
+      { id: 'invoices', label: 'Hóa đơn', description: 'Thanh toán', icon: <PiReceiptLight className="w-5 h-5" />, badge: badges.invoices },
+      { id: 'repairs', label: 'Sửa chữa', description: 'Yêu cầu bảo trì', icon: <PiWrenchLight className="w-5 h-5" />, badge: badges.repairs },
+      { id: 'notifications', label: 'Thông báo', description: 'Cập nhật mới', icon: <PiBellLight className="w-5 h-5" />, badge: badges.notifications },
+      { id: 'chat', label: 'Tin nhắn', description: 'Trao đổi thông tin', icon: <PiChatCircleLight className="w-5 h-5" />, badge: badges.chat },
     ];
-  } else {
-    navItems = [];
   }
 
   return (
     <>
-      <aside className="w-72 bg-white border-r border-charcoal-100/50 fixed h-screen flex flex-col z-40">
+      <aside className="w-72 bg-white border-r border-charcoal-100/50 fixed h-screen flex flex-col z-40 transition-base">
         {/* Brand Section */}
-        <div className="px-7 py-8 border-b border-charcoal-100/50">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-terra-500 rounded-2xl flex items-center justify-center shadow-soft">
-              <Building2 className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold text-charcoal-900 tracking-tight">Quản Lý Phòng Trọ</h1>
-              <p className="text-sm text-charcoal-400 mt-0.5">Hệ thống quản lý chuyên nghiệp</p>
-            </div>
-          </div>
+        <div className="px-7 py-8 border-b border-charcoal-100/50 flex justify-center">
+          <h1 className="text-4xl font-serif text-charcoal-900 tracking-widest uppercase relative inline-block">
+            ARBORIS
+            <span className="absolute top-1 -right-3 text-[10px] tracking-normal text-charcoal-500 font-sans">TM</span>
+          </h1>
         </div>
 
         {/* Navigation */}
@@ -114,29 +102,29 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
               <button
                 key={item.id}
                 onClick={() => onNavigate(item.id)}
-                className={`w-full flex items-center gap-4 px-5 py-3.5 rounded-xl transition-all duration-200 ${
+                className={`w-full flex items-center gap-4 px-5 py-3.5 rounded-xl transition-all duration-200 relative ${
                   isActive
-                    ? 'bg-terra-50 shadow-sm'
+                    ? 'bg-wood-50 shadow-sm'
                     : 'hover:bg-cream-50'
                 }`}
               >
-                <div className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+                <div className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-colors flex-shrink-0 ${
                   isActive
-                    ? 'bg-terra-500 text-white shadow-soft'
+                    ? 'bg-wood-500 text-white shadow-soft'
                     : 'bg-charcoal-50 text-charcoal-400'
-                }`}>
+                }`} style={{ minWidth: '40px', minHeight: '40px' }}>
                   {item.icon}
                   {item.badge ? (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white">
+                    <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full">
                       {item.badge > 99 ? '99+' : item.badge}
                     </span>
                   ) : null}
                 </div>
-                <div className="flex-1 text-left">
-                  <span className={`block text-sm font-medium ${isActive ? 'text-terra-700' : 'text-charcoal-600'}`}>
+                <div className="flex-1 text-left min-w-0">
+                  <span className={`block text-sm font-medium truncate ${isActive ? 'text-wood-700' : 'text-charcoal-600'}`}>
                     {item.label}
                   </span>
-                  <span className={`block text-xs mt-0.5 ${isActive ? 'text-terra-500' : 'text-charcoal-400'}`}>
+                  <span className={`block text-xs mt-0.5 truncate ${isActive ? 'text-wood-500' : 'text-charcoal-400'}`}>
                     {item.description}
                   </span>
                 </div>
@@ -145,29 +133,30 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           })}
         </nav>
 
-        {/* Footer */}
-        <div className="px-4 py-5 border-t border-charcoal-100/50 bg-cream-50/50 flex items-center justify-between gap-2">
-          <button
-            onClick={() => setIsProfileOpen(true)}
-            className="flex items-center gap-3 flex-1 p-2 rounded-xl hover:bg-white hover:shadow-sm transition-all text-left overflow-hidden group"
-          >
-            <div className="w-10 h-10 rounded-full bg-terra-100 flex items-center justify-center flex-shrink-0 group-hover:bg-terra-200 transition-colors">
-              <span className="text-terra-700 font-bold text-sm">
-                {user?.username?.[0]?.toUpperCase() || 'A'}
-              </span>
-            </div>
-            <div className="text-sm truncate">
-              <p className="font-semibold text-charcoal-900 leading-none truncate">{user?.full_name || user?.username}</p>
-              <p className="text-xs text-charcoal-500 mt-1 truncate">{user?.role}</p>
-            </div>
-          </button>
-          <button
-            onClick={logout}
-            className="p-2.5 text-charcoal-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors flex-shrink-0"
-            title="Đăng xuất"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
+        {/* Footer - Keeping as requested */}
+        <div className="p-6">
+          <div className="bg-white rounded-3xl p-2 shadow-sm border border-wood-100/30 flex items-center justify-between">
+            <button
+              onClick={() => setIsProfileOpen(true)}
+              className="flex items-center gap-3 flex-1 px-2 py-1.5 rounded-2xl hover:bg-cream-50 transition-colors text-left overflow-hidden group"
+            >
+              <div className="w-9 h-9 rounded-full bg-wood-100 flex items-center justify-center flex-shrink-0">
+                <span className="text-wood-700 font-serif italic text-sm">
+                  {user?.username?.[0]?.toUpperCase() || 'A'}
+                </span>
+              </div>
+              <div className="text-sm truncate pr-2">
+                <p className="font-medium text-charcoal-900 truncate">{user?.full_name || user?.username}</p>
+              </div>
+            </button>
+            <button
+              onClick={logout}
+              className="p-3 text-charcoal-400 hover:text-charcoal-900 hover:bg-cream-50 rounded-2xl transition-colors flex-shrink-0"
+              title="Đăng xuất"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </aside>
       

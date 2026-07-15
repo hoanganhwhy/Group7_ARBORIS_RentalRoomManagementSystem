@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { Building2, LogIn, Lock, User } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 
-import { loginUser, loginGoogle } from '../lib/api';
+import { loginUser, loginGoogle, changePassword } from '../lib/api';
 
 export function Login() {
   const { login } = useAuth();
@@ -12,6 +12,11 @@ export function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -19,7 +24,11 @@ export function Login() {
 
     try {
       const data = await loginUser({ username, password });
-      login(data.user);
+      if (data.require_password_change) {
+        setRequirePasswordChange(true);
+      } else {
+        login(data.user);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -35,6 +44,91 @@ export function Login() {
       setError(err.message);
     }
   };
+
+  
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (newPassword !== confirmPassword) {
+      setError('Mật khẩu xác nhận không khớp');
+      return;
+    }
+    setLoading(true);
+    try {
+      await changePassword(password, newPassword);
+      // Login after change
+      const data = await loginUser({ username, password: newPassword });
+      login(data.user);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  
+  if (requirePasswordChange) {
+    return (
+      <div className="min-h-screen bg-cream-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">
+        <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+          <div className="bg-white py-8 px-4 shadow-card sm:rounded-2xl sm:px-10 border border-charcoal-100">
+            <h2 className="mb-6 text-center text-2xl font-bold text-charcoal-900 tracking-tight">
+              Bắt buộc đổi mật khẩu
+            </h2>
+            <p className="mb-6 text-center text-sm text-charcoal-500">
+              Đây là lần đăng nhập đầu tiên. Vui lòng đổi mật khẩu để bảo vệ tài khoản của bạn.
+            </p>
+            <form className="space-y-6" onSubmit={handleChangePassword}>
+              {error && (
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
+                  <p className="text-sm text-red-700">{error}</p>
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-charcoal-700">Mật khẩu mới</label>
+                <div className="mt-1 relative rounded-xl shadow-sm">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Lock className="h-5 w-5 text-charcoal-400" />
+                  </div>
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="focus:ring-terra-400 focus:border-terra-400 block w-full pl-10 sm:text-sm border-charcoal-200 rounded-xl py-3"
+                    placeholder="Nhập mật khẩu mới"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-charcoal-700">Xác nhận mật khẩu</label>
+                <div className="mt-1 relative rounded-xl shadow-sm">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Lock className="h-5 w-5 text-charcoal-400" />
+                  </div>
+                  <input
+                    type="password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="focus:ring-terra-400 focus:border-terra-400 block w-full pl-10 sm:text-sm border-charcoal-200 rounded-xl py-3"
+                    placeholder="Xác nhận mật khẩu mới"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-terra-500 hover:bg-terra-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-terra-500 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Đang xử lý...' : 'Đổi mật khẩu & Đăng nhập'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-cream-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8 font-sans">

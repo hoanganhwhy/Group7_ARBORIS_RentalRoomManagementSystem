@@ -2,6 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import http from 'http';
+import fs from 'fs';
 import { Server as SocketIOServer } from 'socket.io';
 
 dotenv.config({ path: path.join(process.cwd(), '.env') });
@@ -17,6 +18,9 @@ import { query, queryOne, run } from './db.js';
 import { setupContracts } from './contracts.js';
 import { setupInvoices } from './invoices.js';
 import aiRoutes from './src/routes/ai.routes.js';
+import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid';
+import fsPromises from 'fs/promises';
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +31,33 @@ const io = new SocketIOServer(server, {
   cors: { origin: true, credentials: true }
 });
 app.set('io', io);
+
+const uploadDir = path.join(process.cwd(), 'uploads', 'rooms');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    cb(null, uuidv4() + ext);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png' || file.mimetype === 'image/webp') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPG, PNG and WEBP images are allowed'));
+    }
+  }
+});
 
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
@@ -61,6 +92,7 @@ app.use(cors({
   credentials: true 
 }));
 app.use(express.json());
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Apply general rate limiting to all requests
 app.use(apiLimiter);
@@ -288,6 +320,7 @@ const mapRoom = (r) => {
     washing_machine: Boolean(r.may_giat),
     furnished: Boolean(r.noi_that),
     balcony: Boolean(r.ban_cong),
+    image_url: r.anh_dai_dien,
     created_at: r.ngay_tao,
     updated_at: r.ngay_cap_nhat
   };
@@ -625,7 +658,7 @@ app.get('/api/rooms/:id', async (req, res) => {
   }
 });
 
-app.post('/api/rooms', async (req, res) => {
+app.post('/api/rooms', upload.single('image'), async (req, res) => {
   try {
     const maxRow = await queryOne('SELECT MAX(id) as maxId FROM phong');
     let id = 'A00001';
@@ -646,6 +679,10 @@ app.post('/api/rooms', async (req, res) => {
       area = 'Khu A', room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2,
       air_conditioner = false, washing_machine = false, furnished = false, balcony = false
     } = req.body;
+      let anh_dai_dien = null;
+      if (req.file) {
+        anh_dai_dien = '/uploads/rooms/' + req.file.filename;
+      }
     
     // Tìm hoặc tạo nhà trọ mới dựa trên khu vực (area)
     let nha_tro = await queryOne('SELECT id FROM nha_tro WHERE ten_nha_tro = ?', [area]);
@@ -659,8 +696,8 @@ app.post('/api/rooms', async (req, res) => {
     }
 
     await run(`
-      INSERT INTO phong (id, nha_tro_id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da, dieu_hoa, may_giat, noi_that, ban_cong)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO phong (id, nha_tro_id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da, dieu_hoa, may_giat, noi_that, ban_cong, anh_dai_dien)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [id, nha_tro_id, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants, air_conditioner ? 1 : 0, washing_machine ? 1 : 0, furnished ? 1 : 0, balcony ? 1 : 0]);
 
     const room = await queryOne('SELECT p.*, n.ten_nha_tro as khu_vuc, n.dia_chi FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.id = ?', [id]);
@@ -670,17 +707,34 @@ app.post('/api/rooms', async (req, res) => {
   }
 });
 
-app.put('/api/rooms/:id', async (req, res) => {
+app.put('/api/rooms/:id', upload.single('image'), async (req, res) => {
   try {
     const { 
-      area, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants,
-      address, distance_km, air_conditioner, washing_machine, furnished, balcony
-    } = req.body;
+        area, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants,
+        address, distance_km, air_conditioner, washing_machine, furnished, balcony, remove_image
+      } = req.body;
     
     const existing = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Room not found' });
     }
+
+      let anh_dai_dien = existing.anh_dai_dien;
+      if (req.file) {
+        anh_dai_dien = '/uploads/rooms/' + req.file.filename;
+        if (existing.anh_dai_dien) {
+          try {
+            await fsPromises.unlink(path.join(process.cwd(), existing.anh_dai_dien));
+          } catch(e) {}
+        }
+      } else if (remove_image === 'true' || remove_image === true) {
+        anh_dai_dien = null;
+        if (existing.anh_dai_dien) {
+          try {
+            await fsPromises.unlink(path.join(process.cwd(), existing.anh_dai_dien));
+          } catch(e) {}
+        }
+      }
 
     const updated = {
       khu_vuc: area !== undefined ? area : existing.khu_vuc,
@@ -705,7 +759,7 @@ app.put('/api/rooms/:id', async (req, res) => {
 
     await run(`
       UPDATE phong 
-      SET nha_tro_id = ?, so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, dieu_hoa = ?, may_giat = ?, noi_that = ?, ban_cong = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      SET nha_tro_id = ?, so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, dieu_hoa = ?, may_giat = ?, noi_that = ?, ban_cong = ?, anh_dai_dien = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [
       nha_tro_id,
@@ -720,6 +774,7 @@ app.put('/api/rooms/:id', async (req, res) => {
       washing_machine !== undefined ? (washing_machine ? 1 : 0) : existing.may_giat,
       furnished !== undefined ? (furnished ? 1 : 0) : existing.noi_that,
       balcony !== undefined ? (balcony ? 1 : 0) : existing.ban_cong,
+      anh_dai_dien,
       req.params.id
     ]);
 
@@ -736,7 +791,13 @@ app.delete('/api/rooms/:id', async (req, res) => {
     if (activeAssign) {
       return res.status(400).json({ error: 'Không thể xóa phòng đang có người thuê. Vui lòng thanh lý hợp đồng trước.' });
     }
-    await run('DELETE FROM phong WHERE id = ?', [req.params.id]);
+    const existing = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
+      if (existing && existing.anh_dai_dien) {
+        try {
+          await fsPromises.unlink(path.join(process.cwd(), existing.anh_dai_dien));
+        } catch(e) {}
+      }
+      await run('DELETE FROM phong WHERE id = ?', [req.params.id]);
     res.status(204).end();
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -2344,14 +2405,14 @@ app.get('/api/chat', authenticate, async (req, res) => {
         return res.status(403).json({ error: 'Không có quyền truy cập khu vực này' });
       }
 
-      const countResult = await queryOne(`SELECT COUNT(*) as total FROM chat_messages WHERE is_group_chat = 1 AND (receiver_id = ? OR receiver_id IS NULL)`, [receiverId]);
+      const countResult = await queryOne(`SELECT COUNT(*) as total FROM chat_messages WHERE is_group_chat = 1 AND (group_type = ? OR group_type IS NULL)`, [receiverId]);
       const totalItems = countResult.total;
 
       const messages = await query(`
         SELECT c.*, u.full_name as sender_name 
         FROM chat_messages c
         LEFT JOIN users u ON c.sender_id = u.id
-        WHERE c.is_group_chat = 1 AND (c.receiver_id = ? OR c.receiver_id IS NULL)
+        WHERE c.is_group_chat = 1 AND (c.group_type = ? OR c.group_type IS NULL)
         ORDER BY c.created_at DESC
         LIMIT ? OFFSET ?
       `, [receiverId, limit, offset]);
@@ -2374,7 +2435,7 @@ app.get('/api/chat', authenticate, async (req, res) => {
       await run(`
         UPDATE chat_messages 
         SET is_read = 1 
-        WHERE is_group_chat = 0 AND sender_id = ? AND receiver_id = 'ADMIN' AND is_read = 0
+        WHERE is_group_chat = 0 AND sender_id = ? AND group_type = 'ADMIN' AND is_read = 0
       `, [target2]);
     } else {
       target1 = req.user.tenant_id;
@@ -2391,8 +2452,8 @@ app.get('/api/chat', authenticate, async (req, res) => {
       SELECT COUNT(*) as total 
       FROM chat_messages 
       WHERE is_group_chat = 0 
-      AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
-    `, [target1, target2, target2, target1]);
+      AND ((sender_id = ? AND (receiver_id = ? OR group_type = ?)) OR (sender_id = ? AND (receiver_id = ? OR group_type = ?)))
+    `, [target1, target2, target2, target2, target1, target1]);
     const totalItems = countResult.total;
 
     const messages = await query(`
@@ -2437,9 +2498,9 @@ app.post('/api/chat', authenticate, async (req, res) => {
     const senderId = req.user.role === 'TENANT' ? req.user.tenant_id : req.user.id;
 
     await run(`
-      INSERT INTO chat_messages (sender_id, sender_role, receiver_id, is_group_chat, content)
-      VALUES (?, ?, ?, ?, ?)
-    `, [senderId, req.user.role, targetId, is_group ? 1 : 0, content]);
+      INSERT INTO chat_messages (sender_id, sender_role, receiver_id, is_group_chat, content, group_type)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `, [senderId, req.user.role, is_group || targetId === 'ADMIN' ? null : targetId, is_group ? 1 : 0, content, is_group || targetId === 'ADMIN' ? targetId : null]);
     
     // Emit socket event
     const io = req.app.get('io');
@@ -2480,7 +2541,7 @@ app.get('/api/badges', authenticate, async (req, res) => {
     let repairCount = 0;
 
     if (req.user.role === 'ADMIN') {
-      const c = await queryOne(`SELECT COUNT(*) as count FROM chat_messages WHERE is_group_chat = 0 AND receiver_id = 'ADMIN' AND is_read = 0 AND is_deleted = 0`);
+      const c = await queryOne(`SELECT COUNT(*) as count FROM chat_messages WHERE is_group_chat = 0 AND group_type = 'ADMIN' AND is_read = 0 AND is_deleted = 0`);
       unreadChat = c.count;
       
       const adminNotifs = await query(`

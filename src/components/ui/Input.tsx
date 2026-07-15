@@ -1,4 +1,5 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useState, useRef, useEffect } from 'react';
+import { PiCaretDownLight } from 'react-icons/pi';
 
 interface InputProps {
   label?: string;
@@ -35,10 +36,10 @@ export function Input({
   rows = 3,
   className = '',
 }: InputProps) {
-  const inputClasses = `w-full px-3.5 py-2.5 rounded-xl border ${
+  const inputClasses = `w-full px-3.5 py-2.5 rounded-2xl border ${
     error
       ? 'border-rose-300 focus:ring-rose-400 focus:border-rose-400'
-      : 'border-charcoal-200 focus:ring-terra-400 focus:border-terra-400'
+      : 'border-charcoal-200 focus:ring-wood-400 focus:border-wood-400'
   } bg-white text-charcoal-900 placeholder-charcoal-400 transition-colors disabled:bg-cream-100 disabled:cursor-not-allowed ${className}`;
 
   const renderInput = () => {
@@ -59,20 +60,13 @@ export function Input({
 
     if (type === 'select') {
       return (
-        <select
-          name={name}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          required={required}
-          disabled={disabled}
+        <CustomSelect 
+          value={value} 
+          onChange={onChange} 
+          options={options || []} 
+          disabled={disabled} 
           className={inputClasses}
-        >
-          {options?.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        />
       );
     }
 
@@ -99,7 +93,7 @@ export function Input({
       {label && (
         <label
           htmlFor={name}
-          className="block text-sm font-medium text-charcoal-700"
+          className="block text-sm font-medium font-sans text-charcoal-800"
         >
           {label}
           {required && <span className="text-rose-500 ml-1">*</span>}
@@ -116,7 +110,7 @@ interface StatCardProps {
   value: string | number;
   icon?: ReactNode;
   trend?: { value: number; label: string };
-  variant?: 'default' | 'terra' | 'sage' | 'amber' | 'rose';
+  variant?: 'default' | 'wood' | 'sage' | 'amber' | 'rose';
 }
 
 export function StatCard({
@@ -128,7 +122,7 @@ export function StatCard({
 }: StatCardProps) {
   const iconBgClasses = {
     default: 'bg-charcoal-100 text-charcoal-500',
-    terra: 'bg-terra-100 text-terra-600',
+    wood: 'bg-wood-100 text-wood-600',
     sage: 'bg-sage-100 text-sage-600',
     amber: 'bg-amber-100 text-amber-600',
     rose: 'bg-rose-100 text-rose-600',
@@ -149,7 +143,7 @@ export function StatCard({
           )}
         </div>
         {icon && (
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${iconBgClasses[variant]}`}>
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${iconBgClasses[variant]}`}>
             {icon}
           </div>
         )}
@@ -170,7 +164,7 @@ export function Badge({ status, variant = 'default', size = 'md' }: BadgeProps) 
     success: 'bg-sage-100 text-sage-700',
     warning: 'bg-amber-100 text-amber-700',
     danger: 'bg-rose-100 text-rose-700',
-    info: 'bg-terra-100 text-terra-700',
+    info: 'bg-wood-100 text-wood-700',
   };
 
   const sizeClasses = {
@@ -232,7 +226,61 @@ export function EmptyState({
 export function Spinner() {
   return (
     <div className="flex items-center justify-center p-8">
-      <div className="w-8 h-8 border-4 border-terra-200 border-t-terra-500 rounded-full animate-spin" />
+      <div className="w-8 h-8 border-4 border-wood-200 border-t-wood-500 rounded-full animate-spin" />
+    </div>
+  );
+}
+
+
+function CustomSelect({ value, onChange, options, disabled, className }: { value: string | number, onChange: (v: string) => void, options: {value: string, label: string}[], disabled?: boolean, className: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (selectRef.current && !selectRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find(opt => opt.value === String(value));
+  const baseClasses = className.replace('focus:ring-wood-400', '').replace('focus:border-wood-400', '');
+
+  return (
+    <div ref={selectRef} className="relative w-full">
+      <div 
+        className={`${baseClasses} flex items-center justify-between cursor-pointer select-none ${disabled ? 'opacity-70 pointer-events-none' : ''} ${isOpen ? 'ring-1 ring-wood-400 border-wood-400' : ''}`}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span className={selectedOption ? 'text-charcoal-900' : 'text-charcoal-400'}>
+          {selectedOption ? selectedOption.label : '-- Chọn --'}
+        </span>
+        <PiCaretDownLight className={`w-4 h-4 text-charcoal-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+      
+      {isOpen && (
+        <div className="absolute z-[100] w-full mt-1 bg-white border border-charcoal-100 rounded-xl shadow-lg max-h-60 overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-150">
+          {options.map((opt) => (
+            <div
+              key={opt.value}
+              className={`px-4 py-2.5 text-sm cursor-pointer transition-colors ${
+                String(value) === opt.value 
+                  ? 'bg-wood-50 text-wood-700 font-medium' 
+                  : 'text-charcoal-700 hover:bg-cream-50'
+              }`}
+              onClick={() => {
+                onChange(opt.value);
+                setIsOpen(false);
+              }}
+            >
+              {opt.label}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

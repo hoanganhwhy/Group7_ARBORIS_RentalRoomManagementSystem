@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Sidebar } from './components/ui/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { TenantDashboard } from './pages/TenantDashboard';
@@ -8,6 +9,7 @@ import { ChatAdmin } from './pages/ChatAdmin';
 import { ChatTenant } from './pages/ChatTenant';
 import { Rooms } from './pages/Rooms';
 import { Tenants } from './pages/Tenants';
+import { TenantAccounts } from './pages/TenantAccounts';
 import { UserManagement } from './pages/UserManagement';
 import { MeterReadings } from './pages/MeterReadings';
 import { Invoices } from './pages/Invoices';
@@ -38,6 +40,8 @@ function AppContent() {
         return <Rooms />;
       case 'tenants':
         return <Tenants />;
+      case 'tenant-accounts':
+        return <TenantAccounts />;
       case 'user-management':
         return <UserManagement />;
       case 'meter-readings':
@@ -124,9 +128,11 @@ function AppContent() {
 
       <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
       <main className="flex-1 ml-72 min-h-screen relative" style={{ zIndex: 1 }}>
-        <div className="py-10 px-12 max-w-6xl mx-auto">
-          {renderPage()}
-        </div>
+        <ErrorBoundary>
+          <div className="py-10 px-12 max-w-6xl mx-auto">
+            {renderPage()}
+          </div>
+        </ErrorBoundary>
       </main>
 
       <AiChatbot />

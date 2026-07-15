@@ -1,38 +1,22 @@
 import { useEffect, useState } from 'react';
-import {
-  Plus,
-  Wrench,
-  Edit2,
-  Trash2,
-  Clock,
-  CheckCircle,
-  AlertTriangle,
-  User,
-  Calendar,
-  MessageCircle,
-  X,
-} from 'lucide-react';
+import { PiPlusLight, PiWrenchLight, PiPencilSimpleLight, PiTrashLight, PiClockLight, PiCheckCircleLight, PiWarningLight, PiUserLight, PiCalendarBlankLight, PiChatCircleLight, PiXLight } from 'react-icons/pi';
 import { Modal } from '../components/ui/Modal';
 import { Button } from '../components/ui/Button';
 import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
-import { useAuth } from '../context/AuthContext';
 import {
   getRepairRequests,
   createRepairRequest,
   updateRepairRequest,
   deleteRepairRequest,
   getRooms,
+  getTenants,
 } from '../lib/api';
-
-import type { RepairRequest, Room } from '../types';
-import { Pagination } from '../components/common/Pagination';
-import { PageSizeSelector } from '../components/common/PageSizeSelector';
-import { SearchInput } from '../components/common/SearchInput';
+import type { RepairRequest, Room, Tenant } from '../types';
 
 export function Repairs() {
-  const { user } = useAuth();
-  const isTenant = user?.role === 'TENANT';
+  const [repairs, setRepairs] = useState<RepairRequest[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -40,19 +24,7 @@ export function Repairs() {
   const [editingRepair, setEditingRepair] = useState<RepairRequest | null>(null);
   const [viewingRepair, setViewingRepair] = useState<RepairRequest | null>(null);
   const [deletingRepair, setDeletingRepair] = useState<RepairRequest | null>(null);
-  const [filter, setFilter] = useState<'all' | 'new' | 'in_progress' | 'resolved' | 'closed'>('new');
-  const [filterMonth, setFilterMonth] = useState<number>(0);
-  const [filterYear, setFilterYear] = useState<number>(0);
-  const [filterFloor, setFilterFloor] = useState<string>('all');
-  const [filterArea, setFilterArea] = useState<string>('all');
-  const [filterDate, setFilterDate] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState('');
-
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
-
-  // Add state for all repairs to compute summary
-  const [allRepairs, setAllRepairs] = useState<RepairRequest[]>([]);
+  const [filter, setFilter] = useState<'all' | 'new' | 'in_progress' | 'resolved' | 'closed'>('all');
 
   const [formData, setFormData] = useState({
     room_id: '',
@@ -67,33 +39,16 @@ export function Repairs() {
 
   const [saving, setSaving] = useState(false);
 
-  // loadData uses the dependencies listed below.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { void loadData(); }, [page, limit, filter, filterMonth, filterYear, filterFloor, filterArea, filterDate, searchQuery]);
-
-  // Reset page when filters change
-  useEffect(() => { setPage(1); }, [filter, filterMonth, filterYear, filterFloor, filterArea, filterDate, searchQuery]);
+  useEffect(() => { loadData(); }, []);
 
   async function loadData() {
     try {
-      setLoading(true);
-      const [repairsData, allRepairsData, roomsData] = await Promise.all([
-        getRepairRequests({
-          page,
-          limit,
-          search: searchQuery,
-          status: filter !== 'all' ? filter : undefined,
-          month: filterMonth > 0 ? filterMonth.toString() : undefined,
-          year: filterYear > 0 ? filterYear.toString() : undefined,
-          floor: filterFloor !== 'all' ? filterFloor : undefined,
-          area: filterArea !== 'all' ? filterArea : undefined,
-          date: filterDate || undefined,
-        } as any),
-        getRepairRequests({ limit: 10000 }),
-        getRooms({ limit: 100 }),
+      const [repairsData, roomsData, tenantsData] = await Promise.all([
+        getRepairRequests(), getRooms(), getTenants(),
       ]);
-      setAllRepairs(allRepairsData.data || []);
-      setRooms(roomsData.data || []);
+      setRepairs(repairsData?.data || repairsData || []);
+      setRooms(roomsData?.data || roomsData || []);
+      setTenants(tenantsData?.data || tenantsData || []);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -103,14 +58,7 @@ export function Repairs() {
 
   function openCreateModal() {
     setEditingRepair(null);
-    let defaultRoom = '';
-    let defaultTenant = '';
-    if (isTenant) {
-      defaultTenant = user?.tenant_id || '';
-      const tenantRoom = rooms.find(r => r.active_assignments?.some(a => a.tenant_id === defaultTenant));
-      defaultRoom = tenantRoom?.id || '';
-    }
-    setFormData({ room_id: defaultRoom, tenant_id: defaultTenant, title: '', description: '', priority: 'medium', status: 'new', assigned_to: '', resolution_notes: '' });
+    setFormData({ room_id: '', tenant_id: '', title: '', description: '', priority: 'medium', status: 'new', assigned_to: '', resolution_notes: '' });
     setIsModalOpen(true);
   }
 
@@ -144,7 +92,7 @@ export function Repairs() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!formData.tenant_id) {
-      alert('Vui lòng chọn người báo (người thuê đăng ký ở phòng này).');
+      alert('Vui lòng chọnngười báo (người thuê đăng ký ở phòng này).');
       return;
     }
     setSaving(true);
@@ -164,7 +112,7 @@ export function Repairs() {
       setIsModalOpen(false);
     } catch (error: any) {
       console.error('Failed to save repair request:', error);
-      const msg = error?.response?.data?.error || error?.message || 'Không thể lưu yêu cầu. Vui lòng thử lại.';
+      const msg = error?.response?.data?.error || error?.message || 'Không thỒ lưu yêu cầu. Vui lòng thử lại.';
       alert(msg);
     } finally {
       setSaving(false);
@@ -177,108 +125,43 @@ export function Repairs() {
       await deleteRepairRequest(deletingRepair.id);
       await loadData();
       setIsDeleteModalOpen(false);
-    } catch {
-      alert('Không thể xóa yêu cầu.');
+    } catch (error) {
+      alert('Không thỒ xóa yêu cầu.');
     }
   }
 
   async function handleStatusChange(repair: RepairRequest, newStatus: 'in_progress' | 'resolved' | 'closed') {
     try {
-      await updateRepairRequest(repair.id, {
+      const updatedRepairData = {
         status: newStatus,
         resolved_at: (newStatus === 'resolved' || newStatus === 'closed') ? new Date().toISOString() : null,
-      });
+      };
+      await updateRepairRequest(repair.id, updatedRepairData);
       await loadData();
-      // Refresh the viewing repair if detail modal is open
+      
+      // Update viewingRepair immediately so the UI reflects the change
       if (viewingRepair?.id === repair.id) {
-        setIsDetailModalOpen(false);
+        setViewingRepair({ ...repair, ...updatedRepairData } as RepairRequest);
       }
-    } catch {
+    } catch (error) {
       alert('Không thể cập nhật trạng thái.');
     }
   }
 
-  const userRepairs = isTenant
-    ? allRepairs.filter(
-        (repair) => String(repair.tenant_id) === String(user?.tenant_id)
-      )
-    : allRepairs;
-
-  // The status counters and visible list must use the same data source.
-  // This avoids a case where the tab shows a count but the list is empty.
-  const matchingRepairs = userRepairs.filter((repair) => {
-    const reportedDate = repair.reported_at
-      ? new Date(repair.reported_at)
-      : null;
-    const query = searchQuery.trim().toLowerCase();
-
-    const matchesStatus =
-      filter === 'all' || repair.status === filter;
-
-    const matchesSearch =
-      !query ||
-      repair.title?.toLowerCase().includes(query) ||
-      repair.description?.toLowerCase().includes(query) ||
-      repair.room?.room_number?.toLowerCase().includes(query) ||
-      repair.room?.area?.toLowerCase().includes(query) ||
-      repair.tenant?.full_name?.toLowerCase().includes(query);
-
-    const matchesMonth =
-      filterMonth === 0 ||
-      (reportedDate !== null &&
-        !Number.isNaN(reportedDate.getTime()) &&
-        reportedDate.getMonth() + 1 === filterMonth);
-
-    const matchesYear =
-      filterYear === 0 ||
-      (reportedDate !== null &&
-        !Number.isNaN(reportedDate.getTime()) &&
-        reportedDate.getFullYear() === filterYear);
-
-    const matchesArea =
-      filterArea === 'all' ||
-      repair.room?.area === filterArea;
-
-    const matchesFloor =
-      filterFloor === 'all' ||
-      String(repair.room?.floor ?? '') === filterFloor;
-
-    const matchesDate =
-      !filterDate ||
-      repair.reported_at?.slice(0, 10) === filterDate;
-
-    return (
-      matchesStatus &&
-      matchesSearch &&
-      matchesMonth &&
-      matchesYear &&
-      matchesArea &&
-      matchesFloor &&
-      matchesDate
-    );
-  });
-
-  const localTotalPages = Math.max(
-    1,
-    Math.ceil(matchingRepairs.length / limit)
-  );
-
-  const filteredRepairs = matchingRepairs.slice(
-    (page - 1) * limit,
-    page * limit
-  );
+  const filteredRepairs = repairs.filter((r) => filter === 'all' || r.status === filter);
 
   const statusCounts = {
-    new: userRepairs.filter((r) => r.status === 'new').length,
-    in_progress: userRepairs.filter((r) => r.status === 'in_progress').length,
-    resolved: userRepairs.filter((r) => r.status === 'resolved').length,
-    closed: userRepairs.filter((r) => r.status === 'closed').length,
+    all: repairs.length,
+    new: repairs.filter((r) => r.status === 'new').length,
+    in_progress: repairs.filter((r) => r.status === 'in_progress').length,
+    resolved: repairs.filter((r) => r.status === 'resolved').length,
+    closed: repairs.filter((r) => r.status === 'closed').length,
   };
 
   // Only tenants currently in the selected room can report a repair
   const tenantsInSelectedRoom = (() => {
     if (!formData.room_id) return [];
-    const room = rooms.find((r) => r.id.toString() === formData.room_id.toString());
+    const room = rooms.find((r) => r.id === formData.room_id);
     return (room?.active_assignments ?? [])
       .map((a) => a.tenant)
       .filter((t): t is NonNullable<typeof t> => Boolean(t));
@@ -291,182 +174,166 @@ export function Repairs() {
       {/* Page Header */}
       <header className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-charcoal-900 tracking-tight">Yêu cầu sửa chữa</h1>
-          <p className="text-charcoal-400 mt-2 text-base">Quản lý và theo dõi các yêu cầu bảo trì</p>
+          <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Sửa chữa</h1>
+          <p className="text-charcoal-400 mt-2 text-sm">Quản lý và theo dõi các yêu cầu bảo trì</p>
         </div>
         <Button onClick={openCreateModal}>
-          <Plus className="w-4 h-4" />
+          <PiPlusLight className="w-4 h-4" />
           Tạo yêu cầu
         </Button>
       </header>
 
       {/* Filters */}
       <section className="space-y-4">
-        <div className="flex gap-2 items-center flex-wrap">
-          {(['new', 'in_progress', 'resolved', 'closed'] as const).map((status) => (
-            <button
-              key={status}
-              onClick={() => setFilter(status)}
+        <div className="flex gap-2 flex-wrap">
+          {(['all', 'new', 'in_progress', 'resolved', 'closed'] as const).map((status) => (
+            <button key={status} onClick={() => setFilter(status)}
               className={`px-5 py-2.5 text-sm font-medium rounded-xl transition-all ${
                 filter === status
                   ? 'bg-white text-charcoal-900 shadow-card border border-charcoal-100'
                   : 'text-charcoal-400 hover:text-charcoal-600 hover:bg-white/50'
               }`}
             >
-              {status === 'new' && 'Mới tạo'}
+              {status === 'all' && 'Tất cả'}
+              {status === 'new' && 'Mới'}
               {status === 'in_progress' && 'Đang xử lý'}
               {status === 'resolved' && 'Đã xong'}
-              {status === 'closed' && 'Lịch sử'}
+              {status === 'closed' && 'Đã đóng'}
               <span className={`ml-2 px-2 py-0.5 rounded-lg text-xs ${
-                filter === status ? 'bg-terra-100 text-terra-700' : 'bg-charcoal-100 text-charcoal-500'
+                filter === status ? 'bg-wood-100 text-wood-700' : 'bg-charcoal-100 text-charcoal-500'
               }`}>{statusCounts[status]}</span>
             </button>
           ))}
-        </div>
-        
-        <div className="flex items-center gap-4 flex-wrap bg-white p-3 rounded-xl border border-charcoal-100 shadow-sm">
-          <input
-            type="date"
-            value={filterDate}
-            onChange={(e) => setFilterDate(e.target.value)}
-            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-            title="Lọc theo ngày báo cáo"
-          />
-          <select
-            value={filterArea}
-            onChange={(e) => setFilterArea(e.target.value)}
-            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-          >
-            <option value="all">Tất cả khu vực</option>
-            {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => (
-              <option key={a} value={a}>{a}</option>
-            ))}
-          </select>
-          <select
-            value={filterFloor}
-            onChange={(e) => setFilterFloor(e.target.value)}
-            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-          >
-            <option value="all">Tất cả tầng</option>
-            {Array.from(new Set(rooms.map(r => r.floor))).sort((a,b)=>Number(a)-Number(b)).map(f => (
-              <option key={f} value={f}>Tầng {f}</option>
-            ))}
-          </select>
-          <select
-            value={filterMonth}
-            onChange={(e) => setFilterMonth(Number(e.target.value))}
-            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-          >
-            <option value={0}>Tất cả tháng</option>
-            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-              <option key={m} value={m}>Tháng {m}</option>
-            ))}
-          </select>
-          <select
-            value={filterYear}
-            onChange={(e) => setFilterYear(Number(e.target.value))}
-            className="px-3 py-2 text-sm rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
-          >
-            <option value={0}>Tất cả năm</option>
-            {Array.from({ length: 11 }, (_, i) => new Date().getFullYear() - i).map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-          <div className="w-64 ml-auto">
-            <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm yêu cầu..." />
-          </div>
-          <PageSizeSelector limit={limit} onLimitChange={setLimit} />
         </div>
       </section>
 
       {filteredRepairs.length === 0 ? (
         <EmptyState
-          icon={<Wrench className="w-8 h-8" />}
+          icon={<PiWrenchLight className="w-8 h-8" />}
           title="Không có yêu cầu nào"
           description={filter === 'all' ? 'Chưa có yêu cầu sửa chữa nào' : 'Không có yêu cầu nào ở trạng thái này'}
-          action={filter === 'all' ? <Button onClick={openCreateModal}><Plus className="w-4 h-4" />Tạo yêu cầu</Button> : undefined}
+          action={filter === 'all' ? <Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4" />Tạo yêu cầu</Button> : undefined}
         />
       ) : (
-        <div className="space-y-3">
-          {filteredRepairs.map((repair) => (
-            <RepairCard
-              key={repair.id}
-              repair={repair}
-              isTenant={isTenant}
-              onView={() => openDetailModal(repair)}
-              onEdit={(e) => openEditModal(repair, e)}
-              onDelete={(e) => openDeleteModal(repair, e)}
-              onStatusChange={handleStatusChange}
-            />
-          ))}
-          
-          {/* Pagination component */}
-          {!loading && filteredRepairs.length > 0 && (
-            <div className="mt-4">
-              <Pagination
-                currentPage={page}
-                totalPages={localTotalPages}
-                hasNextPage={page < localTotalPages}
-                hasPreviousPage={page > 1}
-                onPageChange={setPage}
-              />
-            </div>
-          )}
+        <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-cream-50/50 border-b border-cream-200 text-xs uppercase tracking-widest text-charcoal-500 font-semibold">
+                <th className="px-4 py-3">Phòng</th>
+                <th className="px-4 py-3">Yêu cầu</th>
+                <th className="px-4 py-3 text-center">Mức độ</th>
+                <th className="px-4 py-3 text-center">Trạng thái</th>
+                <th className="px-4 py-3">Ngày báo</th>
+                <th className="px-4 py-3 text-right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-cream-100">
+              {filteredRepairs.map((repair) => {
+                const priorityColors: Record<string, { bg: string; text: string; label: string }> = {
+                  low: { bg: 'bg-charcoal-50', text: 'text-charcoal-500', label: 'Thấp' },
+                  medium: { bg: 'bg-blue-50', text: 'text-blue-600', label: 'Trung bình' },
+                  high: { bg: 'bg-amber-50', text: 'text-amber-600', label: 'Cao' },
+                  urgent: { bg: 'bg-rose-50', text: 'text-rose-600', label: 'Khẩn cấp' },
+                };
+                const priority = priorityColors[repair.priority] || priorityColors.medium;
+                return (
+                  <tr key={repair.id} onClick={() => openDetailModal(repair)} className="hover:bg-cream-50/50 transition-colors group cursor-pointer">
+                    <td className="px-4 py-3 align-middle">
+                      <p className="font-serif font-medium text-wood-700 text-[15px]">P.{repair.room?.room_number}</p>
+                      <p className="text-xs text-charcoal-400 mt-0.5">{repair.tenant?.full_name || '—'}</p>
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <p className="font-serif font-semibold text-charcoal-900 tracking-wide line-clamp-1">{repair.title}</p>
+                      {repair.description && <p className="text-xs text-charcoal-400 mt-0.5 line-clamp-1">{repair.description}</p>}
+                    </td>
+                    <td className="px-4 py-3 align-middle text-center">
+                      <span className={`inline-flex items-center justify-center px-2 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider ${priority.bg} ${priority.text}`}>
+                        {priority.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-center">
+                      <StatusBadge status={repair.status} />
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <span className="font-serif lining-nums tabular-nums font-medium text-charcoal-600">
+                        {new Date(repair.reported_at).toLocaleDateString('vi-VN')}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-right">
+                      <div className="flex justify-end items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                        {repair.status === 'new' && (
+                          <button onClick={() => handleStatusChange(repair, 'in_progress')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-wood-600 bg-wood-50 hover:bg-wood-100 rounded-lg border border-wood-200 transition-colors">
+                            <PiClockLight className="w-3.5 h-3.5" /> Bắt đầu
+                          </button>
+                        )}
+                        {repair.status === 'in_progress' && (
+                          <button onClick={() => handleStatusChange(repair, 'resolved')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
+                            <PiCheckCircleLight className="w-3.5 h-3.5" /> Xong
+                          </button>
+                        )}
+                          {repair.status !== 'closed' && (
+                            <button onClick={(e) => openEditModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Sửa">
+                              <PiPencilSimpleLight className="w-4 h-4" />
+                            </button>
+                          )}
+                        <button onClick={(e) => openDeleteModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200" title="Xóa">
+                          <PiTrashLight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
       {/* Create/Edit Modal */}
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingRepair ? 'Sửa yêu cầu' : 'Tạo yêu cầu sửa chữa'} size="lg">
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-3">
           <Input label="Tiêu đề" name="title" value={formData.title} onChange={(v) => setFormData({ ...formData, title: v })} required placeholder="VD: Bóng đèn bị hỏng" />
           <div className="grid grid-cols-2 gap-4">
             <Input label="Chọn phòng" name="room_id" type="select" value={formData.room_id}
               onChange={(v) => {
-                const room = rooms.find((r) => r.id.toString() === v.toString());
+                const room = rooms.find((r) => r.id === v);
                 const primaryTenant = room?.active_assignments?.find((a) => a.is_primary)?.tenant;
                 setFormData({ ...formData, room_id: v, tenant_id: primaryTenant?.id || '' });
               }}
               required
-              disabled={isTenant}
               options={[{ value: '', label: '-- Chọn phòng --' }, ...rooms.map((r) => ({ value: r.id, label: `Phòng ${r.room_number}` }))]}
             />
-            {!isTenant && (
-              <Input label="Người báo (Bắt buộc)" name="tenant_id" type="select" value={formData.tenant_id}
-                onChange={(v) => setFormData({ ...formData, tenant_id: v })}
-                disabled={!formData.room_id}
-                required
-                options={[
-                  {
-                    value: '',
-                    label: !formData.room_id
-                      ? '-- Chọn phòng trước --'
-                      : tenantsInSelectedRoom.length === 0
-                      ? '-- Không có người ở phòng này --'
-                      : '-- Chọn người báo --',
-                  },
-                  ...tenantsInSelectedRoom.map((t) => ({ value: t.id, label: t.full_name })),
-                ]}
-              />
-            )}
+            <Input label="Người báo (Bắt buộc)" name="tenant_id" type="select" value={formData.tenant_id}
+              onChange={(v) => setFormData({ ...formData, tenant_id: v })}
+              disabled={!formData.room_id}
+              required
+              options={[
+                {
+                  value: '',
+                  label: !formData.room_id
+                    ? '-- Chọn phòng trước --'
+                    : tenantsInSelectedRoom.length === 0
+                    ? '-- Không có người ở phòng này --'
+                    : '-- Chọnngười báo --',
+                },
+                ...tenantsInSelectedRoom.map((t) => ({ value: t.id, label: t.full_name })),
+              ]}
+            />
           </div>
-          <Input label="Mô tả chi tiết" name="description" type="textarea" value={formData.description} onChange={(v) => setFormData({ ...formData, description: v })} placeholder="Mô tả chi tiết sự cố..." rows={3} />
-          {!isTenant && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <Input label="Mức độ ưu tiên" name="priority" type="select" value={formData.priority}
-                  onChange={(v) => setFormData({ ...formData, priority: v as 'low' | 'medium' | 'high' | 'urgent' })}
-                  options={[{ value: 'low', label: 'Thấp' }, { value: 'medium', label: 'Trung bình' }, { value: 'high', label: 'Cao' }, { value: 'urgent', label: 'Khẩn cấp' }]}
-                />
-                <Input label="Trạng thái" name="status" type="select" value={formData.status}
-                  onChange={(v) => setFormData({ ...formData, status: v as 'new' | 'in_progress' | 'resolved' | 'closed' })}
-                  options={[{ value: 'new', label: 'Mới tạo' }, { value: 'in_progress', label: 'Đang xử lý' }, { value: 'resolved', label: 'Đã xong' }, { value: 'closed', label: 'Lịch sử' }]}
-                />
-              </div>
-              <Input label="Người phụ trách" name="assigned_to" value={formData.assigned_to} onChange={(v) => setFormData({ ...formData, assigned_to: v })} placeholder="VD: Nguyễn Văn A" />
-              {(formData.status === 'resolved' || formData.status === 'closed') && (
-                <Input label="Ghi chú xử lý" name="resolution_notes" type="textarea" value={formData.resolution_notes} onChange={(v) => setFormData({ ...formData, resolution_notes: v })} placeholder="Mô tả cách xử lý..." rows={2} />
-              )}
-            </>
+          <Input label="Mô tả chi tiết" name="description" type="textarea" value={formData.description} onChange={(v) => setFormData({ ...formData, description: v })} placeholder="Mô tả chi tiết sự cố..." rows={2} />
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Mức độ ưu tiên" name="priority" type="select" value={formData.priority}
+              onChange={(v) => setFormData({ ...formData, priority: v as 'low' | 'medium' | 'high' | 'urgent' })}
+              options={[{ value: 'low', label: 'Thấp' }, { value: 'medium', label: 'Trung bình' }, { value: 'high', label: 'Cao' }, { value: 'urgent', label: 'Khẩn cấp' }]}
+            />
+            <Input label="Trạng thái" name="status" type="select" value={formData.status}
+              onChange={(v) => setFormData({ ...formData, status: v as 'new' | 'in_progress' | 'resolved' | 'closed' })}
+              options={[{ value: 'new', label: 'Mới tạo' }, { value: 'in_progress', label: 'Đang xử lý' }, { value: 'resolved', label: 'Đã xong' }, { value: 'closed', label: 'Đã đóng' }]}
+            />
+          </div>
+          <Input label="Người phụ trách" name="assigned_to" value={formData.assigned_to} onChange={(v) => setFormData({ ...formData, assigned_to: v })} placeholder="VD: Nguyễn Văn A" />
+          {(formData.status === 'resolved' || formData.status === 'closed') && (
+            <Input label="Ghi chú xử lý" name="resolution_notes" type="textarea" value={formData.resolution_notes} onChange={(v) => setFormData({ ...formData, resolution_notes: v })} placeholder="Mô tả cách xử lý..." rows={2} />
           )}
           <div className="flex gap-3 pt-4 border-t border-slate-200">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Hủy</Button>
@@ -481,7 +348,7 @@ export function Repairs() {
           <div className="p-6 space-y-5">
             <div className="flex items-center gap-3 flex-wrap">
               <PriorityIcon priority={viewingRepair.priority} />
-              <h3 className="text-xl font-bold text-slate-900 flex-1">{viewingRepair.title}</h3>
+              <h3 className="text-2xl font-serif font-bold text-charcoal-900 flex-1 tracking-wide">{viewingRepair.title}</h3>
               <StatusBadge status={viewingRepair.status} />
             </div>
 
@@ -494,7 +361,7 @@ export function Repairs() {
             <div className="grid grid-cols-2 gap-4">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center">
-                  <Wrench className="w-4 h-4 text-charcoal-500" />
+                  <PiWrenchLight className="w-4 h-4 text-charcoal-500" />
                 </div>
                 <div>
                   <p className="text-xs text-charcoal-400">Phòng</p>
@@ -504,7 +371,7 @@ export function Repairs() {
               {viewingRepair.tenant && (
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center">
-                    <User className="w-4 h-4 text-charcoal-500" />
+                    <PiUserLight className="w-4 h-4 text-charcoal-500" />
                   </div>
                   <div>
                     <p className="text-xs text-charcoal-400">Người báo</p>
@@ -514,7 +381,7 @@ export function Repairs() {
               )}
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center">
-                  <Calendar className="w-4 h-4 text-charcoal-500" />
+                  <PiCalendarBlankLight className="w-4 h-4 text-charcoal-500" />
                 </div>
                 <div>
                   <p className="text-xs text-charcoal-400">Ngày báo</p>
@@ -524,7 +391,7 @@ export function Repairs() {
               {viewingRepair.assigned_to && (
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center">
-                    <User className="w-4 h-4 text-charcoal-500" />
+                    <PiUserLight className="w-4 h-4 text-charcoal-500" />
                   </div>
                   <div>
                     <p className="text-xs text-charcoal-400">Người phụ trách</p>
@@ -537,7 +404,7 @@ export function Repairs() {
             {viewingRepair.resolution_notes && (
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  <MessageCircle className="w-4 h-4 text-charcoal-400" />
+                  <PiChatCircleLight className="w-4 h-4 text-charcoal-400" />
                   <p className="text-sm font-medium text-charcoal-600">Ghi chú xử lý</p>
                 </div>
                 <div className="p-3 bg-sage-50 rounded-xl border border-sage-200">
@@ -546,28 +413,28 @@ export function Repairs() {
               </div>
             )}
 
-            {!isTenant && (
-              <div className="flex gap-2 pt-5 border-t border-charcoal-100 flex-wrap">
-                {viewingRepair.status === 'new' && (
-                  <Button onClick={() => handleStatusChange(viewingRepair, 'in_progress')}>
-                    <Clock className="w-4 h-4" />Bắt đầu xử lý
-                  </Button>
-                )}
-                {viewingRepair.status === 'in_progress' && (
-                  <Button variant="success" onClick={() => handleStatusChange(viewingRepair, 'resolved')}>
-                    <CheckCircle className="w-4 h-4" />Đã hoàn thành
-                  </Button>
-                )}
-                {viewingRepair.status === 'resolved' && (
-                  <Button variant="secondary" onClick={() => handleStatusChange(viewingRepair, 'closed')}>
-                    <X className="w-4 h-4" />Đóng yêu cầu
-                  </Button>
-                )}
-                <Button variant="ghost" onClick={() => { setIsDetailModalOpen(false); openEditModal(viewingRepair); }}>
-                  <Edit2 className="w-4 h-4" />Sửa
+            <div className="flex gap-2 pt-5 border-t border-charcoal-100 flex-wrap">
+              {viewingRepair.status === 'new' && (
+                <Button onClick={() => handleStatusChange(viewingRepair, 'in_progress')}>
+                  <PiClockLight className="w-4 h-4" />Bắt đầu xử lý
                 </Button>
-              </div>
-            )}
+              )}
+              {viewingRepair.status === 'in_progress' && (
+                <Button variant="success" onClick={() => handleStatusChange(viewingRepair, 'resolved')}>
+                  <PiCheckCircleLight className="w-4 h-4" />Đã hoàn thành
+                </Button>
+              )}
+              {viewingRepair.status === 'resolved' && (
+                <Button variant="secondary" onClick={() => handleStatusChange(viewingRepair, 'closed')}>
+                  <PiXLight className="w-4 h-4" />Đóng yêu cầu
+                </Button>
+              )}
+              {viewingRepair.status !== 'closed' && (
+                <Button variant="ghost" onClick={() => { setIsDetailModalOpen(false); openEditModal(viewingRepair); }}>
+                  <PiPencilSimpleLight className="w-4 h-4" />Sửa
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </Modal>
@@ -582,110 +449,6 @@ export function Repairs() {
           </div>
         </div>
       </Modal>
-    </div>
-  );
-}
-
-function RepairCard({
-  repair,
-  isTenant,
-  onView,
-  onEdit,
-  onDelete,
-  onStatusChange,
-}: {
-  repair: RepairRequest;
-  isTenant: boolean;
-  onView: () => void;
-  onEdit: (e: React.MouseEvent) => void;
-  onDelete: (e: React.MouseEvent) => void;
-  onStatusChange: (r: RepairRequest, s: 'in_progress' | 'resolved' | 'closed') => void;
-}) {
-  const priorityColors: Record<string, { bg: string; text: string; dot: string }> = {
-    low: { bg: 'bg-charcoal-50', text: 'text-charcoal-500', dot: 'bg-charcoal-300' },
-    medium: { bg: 'bg-blue-50', text: 'text-blue-600', dot: 'bg-blue-400' },
-    high: { bg: 'bg-amber-50', text: 'text-amber-600', dot: 'bg-amber-400' },
-    urgent: { bg: 'bg-rose-50', text: 'text-rose-600', dot: 'bg-rose-400' },
-  };
-
-  const priority = priorityColors[repair.priority] || priorityColors.medium;
-
-  return (
-    <div
-      onClick={onView}
-      className="bg-white rounded-2xl border border-charcoal-100 shadow-card hover:shadow-card-hover transition-all duration-300 cursor-pointer overflow-hidden group"
-    >
-      <div className="px-7 py-6">
-        <div className="flex items-start gap-5">
-          {/* Priority indicator */}
-          <div className={`w-1 h-16 rounded-full ${priority.dot} shrink-0`} />
-
-          <div className="flex-1 min-w-0">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <h3 className="text-lg font-semibold text-charcoal-900">{repair.title}</h3>
-                  <StatusBadge status={repair.status} />
-                </div>
-                {repair.description && (
-                  <p className="text-charcoal-400 text-sm line-clamp-2 leading-relaxed">{repair.description}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Meta info */}
-            <div className="flex items-center gap-6 text-sm text-charcoal-400">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-charcoal-50 flex items-center justify-center">
-                  <Wrench className="w-3.5 h-3.5" />
-                </div>
-                <span>Phòng {repair.room?.room_number}</span>
-              </div>
-              {repair.tenant && (
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-charcoal-50 flex items-center justify-center">
-                    <User className="w-3.5 h-3.5" />
-                  </div>
-                  <span>{repair.tenant.full_name}</span>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-charcoal-50 flex items-center justify-center">
-                  <Calendar className="w-3.5 h-3.5" />
-                </div>
-                <span>{new Date(repair.reported_at).toLocaleDateString('vi-VN')}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-            {repair.status === 'new' && !isTenant && (
-              <button onClick={(e) => { e.stopPropagation(); onStatusChange(repair, 'in_progress'); }}
-                className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-terra-600 bg-terra-50 hover:bg-terra-100 rounded-xl transition-colors">
-                <Clock className="w-4 h-4" />Bắt đầu
-              </button>
-            )}
-            {repair.status === 'in_progress' && !isTenant && (
-              <button onClick={(e) => { e.stopPropagation(); onStatusChange(repair, 'resolved'); }}
-                className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-xl transition-colors">
-                <CheckCircle className="w-4 h-4" />Hoàn thành
-              </button>
-            )}
-            {(!isTenant || repair.status === 'new') && (
-              <>
-                <button onClick={onEdit} className="p-2.5 rounded-xl text-charcoal-400 hover:text-charcoal-600 hover:bg-charcoal-50 transition-colors">
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button onClick={onDelete} className="p-2.5 rounded-xl text-charcoal-400 hover:text-rose-500 hover:bg-rose-50 transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -707,8 +470,9 @@ function PriorityIcon({ priority }: { priority: string }) {
   const c = config[priority] || config.medium;
   return (
     <span className={`inline-flex items-center px-3 py-1 rounded-lg text-sm font-medium ${c.bg} ${c.text}`}>
-      <AlertTriangle className="w-4 h-4 mr-1.5" />
+      <PiWarningLight className="w-4 h-4 mr-1.5" />
       {c.label}
     </span>
   );
 }
+

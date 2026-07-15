@@ -20,10 +20,18 @@ const db = new sqlite3.Database(dbPath, (err) => {
     console.error('Error opening database:', err.message);
     rejectDbReady(err);
   } else {
-    if (!isTest) {
-      console.log('Connected to SQLite database at:', dbPath);
-    }
-    initDatabase().then(resolveDbReady).catch(rejectDbReady);
+    db.run('PRAGMA foreign_keys = ON', (err) => {
+      if (err) {
+        console.error('Failed to enable foreign keys:', err);
+        rejectDbReady(err);
+      } else {
+        if (!isTest) {
+          console.log('Connected to SQLite database at:', dbPath);
+          console.log('Foreign key constraints enabled.');
+        }
+        initDatabase().then(resolveDbReady).catch(rejectDbReady);
+      }
+    });
   }
 });
 
