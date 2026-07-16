@@ -1,0 +1,1 @@
+const db = require('./db.js'); async function run() { try { console.log(await db.query('SELECT sql FROM sqlite_master WHERE type=''table'' AND name=''hop_dong_thue''')); console.log(await db.query('SELECT sql FROM sqlite_master WHERE type=''table'' AND name=''khach_thue''')); } catch(e) { console.error(e); } } run();

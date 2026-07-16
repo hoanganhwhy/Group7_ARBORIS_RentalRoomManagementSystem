@@ -23,8 +23,12 @@ import {
   getMeterReadings,
 } from '../lib/api';
 import type { Invoice, Room, MeterReading } from '../types';
+import { useAuth } from '../context/AuthContext';
+import { MockPaymentGateway } from './MockPaymentGateway';
 
 export function Invoices() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [readings, setReadings] = useState<MeterReading[]>([]);
@@ -33,6 +37,7 @@ export function Invoices() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
+  const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
   const [filterYear, setFilterYear] = useState<number>(new Date().getFullYear());
@@ -78,16 +83,24 @@ export function Invoices() {
 
   async function loadData() {
     try {
-      // Mark any pending invoices past their due date as overdue before fetching
       await markOverdueInvoices().catch(() => {});
       const [invoicesData, roomsData, readingsData] = await Promise.all([
         getInvoices(),
         getRooms(),
         getMeterReadings(),
       ]);
-      setInvoices(invoicesData?.data || invoicesData || []);
-      setRooms(roomsData?.data || roomsData || []);
-      setReadings(readingsData?.data || readingsData || []);
+      const allInvoices = invoicesData?.data || invoicesData || [];
+      const roomsList = roomsData?.data || roomsData || [];
+      const readingsList = readingsData?.data || readingsData || [];
+      
+      if (isAdmin) {
+        setInvoices(allInvoices);
+      } else {
+        const myRooms = roomsList.filter((r: any) => r.current_assignment?.tenant_id === user?.tenant_id).map((r: any) => r.id);
+        setInvoices(allInvoices.filter((i: any) => myRooms.includes(i.room_id)));
+      }
+      setRooms(roomsList);
+      setReadings(readingsList);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -250,18 +263,25 @@ export function Invoices() {
 
   if (loading) return <Spinner />;
 
+  if (payingInvoice) {
+    const remainingAmount = Number(payingInvoice.total_amount) - Number(payingInvoice.paid_amount || 0);
+    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={remainingAmount} onBack={() => { setPayingInvoice(null); loadData(); }} />;
+  }
+
   return (
     <div className="space-y-10">
       {/* Page Header */}
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Hóa đơn</h1>
-          <p className="text-charcoal-400 mt-2 text-sm">Lập và quản lý hóa đơn thanh toán</p>
+          <p className="text-charcoal-400 mt-2 text-sm">{isAdmin ? 'Lập và quản lý hóa đơn thanh toán' : 'Xem và thanh toán hóa đơn của bạn'}</p>
         </div>
-        <Button onClick={openCreateModal}>
-          <PiPlusLight className="w-4 h-4" />
-          Tạo hóa đơn
-        </Button>
+        {isAdmin && (
+          <Button onClick={openCreateModal}>
+            <PiPlusLight className="w-4 h-4" />
+            Tạo hóa đơn
+          </Button>
+        )}
       </header>
 
       {/* Financial Summary */}
@@ -357,7 +377,7 @@ export function Invoices() {
             icon={<PiReceiptLight className="w-10 h-10" />}
             title="Chưa có hóa đơn nào"
             description="Bắt đầu tạo hóa đơn thanh toán cho khách thuê"
-            action={<Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4" />Tạo hóa đơn</Button>}
+            action={isAdmin ? <Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4" />Tạo hóa đơn</Button> : undefined}
           />
         </div>
       ) : (
@@ -407,26 +427,30 @@ export function Invoices() {
                   <td className="px-4 py-3 align-middle text-right">
                     <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                       {invoice.status === 'pending' && (
-                        <button onClick={() => handleMarkPaid(invoice)} className="px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
+                        <button onClick={() => isAdmin ? handleMarkPaid(invoice) : setPayingInvoice(invoice)} className="px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
                           Thanh toán
                         </button>
                       )}
-                      <button
-                        onClick={() => openEditModal(invoice)}
-                        className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200"
-                        disabled={invoice.status === 'paid'}
-                        title="Sửa"
-                      >
-                        <PiPencilSimpleLight className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => openDeleteModal(invoice)}
-                        className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200"
-                        disabled={invoice.status === 'paid'}
-                        title="Xóa"
-                      >
-                        <PiTrashLight className="w-4 h-4" />
-                      </button>
+                      {isAdmin && (
+                        <>
+                          <button
+                            onClick={() => openEditModal(invoice)}
+                            className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200"
+                            disabled={invoice.status === 'paid'}
+                            title="Sửa"
+                          >
+                            <PiPencilSimpleLight className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => openDeleteModal(invoice)}
+                            className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200"
+                            disabled={invoice.status === 'paid'}
+                            title="Xóa"
+                          >
+                            <PiTrashLight className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

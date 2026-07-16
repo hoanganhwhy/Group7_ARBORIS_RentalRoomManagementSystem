@@ -41,7 +41,7 @@ export function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
     setSuccess('');
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/auth/me`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/auth/me`, {
         method: 'PUT',
         credentials: 'include',
         headers: {

@@ -66,20 +66,16 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
       { id: 'dashboard', label: 'Tổng quan', description: 'Xem nhanh hoạt động', icon: <PiGridFourLight className="w-5 h-5" /> },
       { id: 'invoices', label: 'Hóa đơn', description: 'Thanh toán', icon: <PiReceiptLight className="w-5 h-5" />, badge: badges.invoices },
       { id: 'repairs', label: 'Sửa chữa', description: 'Yêu cầu bảo trì', icon: <PiWrenchLight className="w-5 h-5" />, badge: badges.repairs },
-      { id: 'notifications', label: 'Thông báo', description: 'Cập nhật mới', icon: <PiBellLight className="w-5 h-5" />, badge: badges.notifications },
     ];
   } else if (user?.role === 'ADMIN') {
     navItems = [
       { id: 'dashboard', label: 'Tổng quan', description: 'Xem nhanh hoạt động', icon: <PiGridFourLight className="w-5 h-5" /> },
       { id: 'rooms', label: 'Phòng trọ', description: 'Quản lý phòng', icon: <PiArmchairLight className="w-5 h-5" /> },
       { id: 'tenants', label: 'Người thuê', description: 'Thông tin thuê', icon: <PiUsersLight className="w-5 h-5" /> },
-      { id: 'tenant-accounts', label: 'Tài khoản KH', description: 'Quản lý tài khoản', icon: <PiIdentificationBadgeLight className="w-5 h-5" /> },
-      { id: 'user-management', label: 'Phân quyền', description: 'Quản lý Admin', icon: <PiIdentificationBadgeLight className="w-5 h-5" /> },
+      { id: 'tenant-accounts', label: 'Tài khoản', description: 'Quản lý tài khoản', icon: <PiIdentificationBadgeLight className="w-5 h-5" /> },
       { id: 'meter-readings', label: 'Điện nước', description: 'Chỉ số tiêu thụ', icon: <PiLightningLight className="w-5 h-5" /> },
       { id: 'invoices', label: 'Hóa đơn', description: 'Thanh toán', icon: <PiReceiptLight className="w-5 h-5" />, badge: badges.invoices },
       { id: 'repairs', label: 'Sửa chữa', description: 'Yêu cầu bảo trì', icon: <PiWrenchLight className="w-5 h-5" />, badge: badges.repairs },
-      { id: 'notifications', label: 'Thông báo', description: 'Cập nhật mới', icon: <PiBellLight className="w-5 h-5" />, badge: badges.notifications },
-      { id: 'chat', label: 'Tin nhắn', description: 'Trao đổi thông tin', icon: <PiChatCircleLight className="w-5 h-5" />, badge: badges.chat },
     ];
   }
 

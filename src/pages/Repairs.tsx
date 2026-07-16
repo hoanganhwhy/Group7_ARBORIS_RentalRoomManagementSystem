@@ -12,8 +12,11 @@ import {
   getTenants,
 } from '../lib/api';
 import type { RepairRequest, Room, Tenant } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 export function Repairs() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [repairs, setRepairs] = useState<RepairRequest[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -260,26 +263,28 @@ export function Repairs() {
                       </span>
                     </td>
                     <td className="px-4 py-3 align-middle text-right">
-                      <div className="flex justify-end items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                        {repair.status === 'new' && (
-                          <button onClick={() => handleStatusChange(repair, 'in_progress')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-wood-600 bg-wood-50 hover:bg-wood-100 rounded-lg border border-wood-200 transition-colors">
-                            <PiClockLight className="w-3.5 h-3.5" /> Bắt đầu
-                          </button>
-                        )}
-                        {repair.status === 'in_progress' && (
-                          <button onClick={() => handleStatusChange(repair, 'resolved')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
-                            <PiCheckCircleLight className="w-3.5 h-3.5" /> Xong
-                          </button>
-                        )}
-                          {repair.status !== 'closed' && (
-                            <button onClick={(e) => openEditModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Sửa">
-                              <PiPencilSimpleLight className="w-4 h-4" />
+                      {isAdmin && (
+                        <div className="flex justify-end items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                          {repair.status === 'new' && (
+                            <button onClick={() => handleStatusChange(repair, 'in_progress')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-wood-600 bg-wood-50 hover:bg-wood-100 rounded-lg border border-wood-200 transition-colors">
+                              <PiClockLight className="w-3.5 h-3.5" /> Bắt đầu
                             </button>
                           )}
-                        <button onClick={(e) => openDeleteModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200" title="Xóa">
-                          <PiTrashLight className="w-4 h-4" />
-                        </button>
-                      </div>
+                          {repair.status === 'in_progress' && (
+                            <button onClick={() => handleStatusChange(repair, 'resolved')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
+                              <PiCheckCircleLight className="w-3.5 h-3.5" /> Xong
+                            </button>
+                          )}
+                            {repair.status !== 'closed' && (
+                              <button onClick={(e) => openEditModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Sửa">
+                                <PiPencilSimpleLight className="w-4 h-4" />
+                              </button>
+                            )}
+                          <button onClick={(e) => openDeleteModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200" title="Xóa">
+                            <PiTrashLight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -413,28 +418,30 @@ export function Repairs() {
               </div>
             )}
 
-            <div className="flex gap-2 pt-5 border-t border-charcoal-100 flex-wrap">
-              {viewingRepair.status === 'new' && (
-                <Button onClick={() => handleStatusChange(viewingRepair, 'in_progress')}>
-                  <PiClockLight className="w-4 h-4" />Bắt đầu xử lý
-                </Button>
-              )}
-              {viewingRepair.status === 'in_progress' && (
-                <Button variant="success" onClick={() => handleStatusChange(viewingRepair, 'resolved')}>
-                  <PiCheckCircleLight className="w-4 h-4" />Đã hoàn thành
-                </Button>
-              )}
-              {viewingRepair.status === 'resolved' && (
-                <Button variant="secondary" onClick={() => handleStatusChange(viewingRepair, 'closed')}>
-                  <PiXLight className="w-4 h-4" />Đóng yêu cầu
-                </Button>
-              )}
-              {viewingRepair.status !== 'closed' && (
-                <Button variant="ghost" onClick={() => { setIsDetailModalOpen(false); openEditModal(viewingRepair); }}>
-                  <PiPencilSimpleLight className="w-4 h-4" />Sửa
-                </Button>
-              )}
-            </div>
+            {isAdmin && (
+              <div className="flex gap-2 pt-5 border-t border-charcoal-100 flex-wrap">
+                {viewingRepair.status === 'new' && (
+                  <Button onClick={() => handleStatusChange(viewingRepair, 'in_progress')}>
+                    <PiClockLight className="w-4 h-4" />Bắt đầu xử lý
+                  </Button>
+                )}
+                {viewingRepair.status === 'in_progress' && (
+                  <Button variant="success" onClick={() => handleStatusChange(viewingRepair, 'resolved')}>
+                    <PiCheckCircleLight className="w-4 h-4" />Đã hoàn thành
+                  </Button>
+                )}
+                {viewingRepair.status === 'resolved' && (
+                  <Button variant="secondary" onClick={() => handleStatusChange(viewingRepair, 'closed')}>
+                    <PiXLight className="w-4 h-4" />Đóng yêu cầu
+                  </Button>
+                )}
+                {viewingRepair.status !== 'closed' && (
+                  <Button variant="ghost" onClick={() => { setIsDetailModalOpen(false); openEditModal(viewingRepair); }}>
+                    <PiPencilSimpleLight className="w-4 h-4" />Sửa
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Modal>

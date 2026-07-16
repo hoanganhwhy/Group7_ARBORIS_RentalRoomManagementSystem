@@ -5,11 +5,11 @@ import SignatureCanvas from 'react-signature-canvas';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { MockPaymentGateway } from './MockPaymentGateway';
-import { getRepairRequests, changePassword } from '../lib/api';
+import { getRepairRequests, changePassword, getImageUrl } from '../lib/api';
 import { RoomCard } from '../components/tenant/RoomCard';
 import { FinancialsCard } from '../components/tenant/FinancialsCard';
 import { MaintenanceCard } from '../components/tenant/MaintenanceCard';
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const ROOM_IMAGES = [
   'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&q=80&w=2000',
@@ -151,7 +151,8 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
   };
 
   if (payingInvoice) {
-    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); loadPortalData(); loadRepairSummary(); }} />;
+    const remainingAmount = Number(payingInvoice.total_amount) - Number(payingInvoice.paid_amount || 0);
+    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={remainingAmount} onBack={() => { setPayingInvoice(null); loadPortalData(); loadRepairSummary(); }} />;
   }
 
   const rentals = portalData?.rentals || (portalData?.assignment ? [{

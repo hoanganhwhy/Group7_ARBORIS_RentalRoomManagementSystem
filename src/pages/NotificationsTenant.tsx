@@ -19,7 +19,7 @@ export default function NotificationsTenant({ onNavigate }: { onNavigate?: (page
     if (showLoading) setLoading(true);
     try {
       // Always fetch main notifications without pagination limits
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/notifications/my?archive=false&limit=100`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=false&limit=100`, {
         credentials: 'include'
       });
       if(res.ok) {

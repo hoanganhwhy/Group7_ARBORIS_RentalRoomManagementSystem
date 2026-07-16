@@ -51,21 +51,6 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
     alert('Đã sao chép: ' + text);
   };
 
-  const handleReportPayment = async () => {
-    if (!invoice?.id) return;
-    try {
-      setReporting(true);
-      await reportPayment(invoice.id);
-      // Wait for the next poll to update UI, or just update locally:
-      setInvoice({ ...invoice, status: 'waiting_confirmation' });
-    } catch (error) {
-      alert('Có lỗi xảy ra khi báo cáo thanh toán');
-      console.error(error);
-    } finally {
-      setReporting(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center">
@@ -173,28 +158,13 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
         )}
 
 
-        <Button
-          onClick={handleReportPayment}
-          disabled={reporting || !invoice?.qrUrl}
-          className="w-full mb-6 justify-center"
-          size="lg"
-        >
-          {reporting ? (
-            <Loader2 className="w-5 h-5 animate-spin mr-2" />
-          ) : (
-            <CheckCircle2 className="w-5 h-5 mr-2" />
-          )}
-          {reporting ? 'Đang gửi xác nhận...' : 'Tôi đã chuyển khoản thành công'}
-        </Button>
-
         <div className="bg-blue-50 text-blue-700 p-5 rounded-2xl text-sm leading-relaxed mb-6 border border-blue-100 shadow-sm">
           <p className="font-semibold mb-3 flex items-center gap-2">
             <AlertCircle className="w-5 h-5" /> Lưu ý quan trọng:
           </p>
           <ul className="list-disc pl-5 space-y-2">
             <li>Nội dung chuyển khoản (Mã hóa đơn) phải <strong>chính xác tuyệt đối</strong> để hệ thống tự động nhận diện.</li>
-            <li>Sau khi chuyển khoản thành công, màn hình này sẽ tự động cập nhật nếu hệ thống có kết nối API tự động.</li>
-            <li>Nếu chờ lâu không thấy cập nhật, bạn có thể bấm nút <strong>"Tôi đã chuyển khoản thành công"</strong> để báo cho chủ nhà biết.</li>
+            <li>Sau khi chuyển khoản thành công, màn hình này sẽ tự động cập nhật do hệ thống có kết nối API tự động.</li>
           </ul>
         </div>
       </div>

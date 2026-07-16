@@ -30,7 +30,7 @@ export function RoomCard({ rental, userFullName, bgImg, roomInvoices = [], roomR
           <div className="flex items-center justify-between text-white/80 mb-2">
             <div className="flex items-center gap-2">
               <MapPin className="w-3.5 h-3.5" />
-              <span className="uppercase tracking-[0.2em] text-[10px] font-bold line-clamp-1" title={rental.room.area}>{rental.room.area}</span>
+              <span className="uppercase tracking-[0.2em] text-[10px] font-bold line-clamp-1" title={rental.room.area || "Nhà Trọ"}>{rental.room.area || "Nhà Trọ"}</span>
             </div>
             
             {/* Members List */}
@@ -48,18 +48,18 @@ export function RoomCard({ rental, userFullName, bgImg, roomInvoices = [], roomR
           <div className="flex items-end justify-between">
             <div>
               <h3 className="text-4xl font-serif text-white tracking-tight mb-1 flex items-center gap-2">
-                P.{rental.room.room_number}
-                {rental.chu_hop_dong === userFullName && (
+                P.{rental.room.room_number || rental.room.so_phong}
+                {rental.chu_hop_dong?.full_name === userFullName && (
                   <Crown className="w-6 h-6 text-yellow-400" />
                 )}
               </h3>
               <p className="text-white/70 text-xs font-light">
-                {rental.chu_hop_dong === userFullName ? 'Người đứng tên chính' : `Đại diện: ${rental.chu_hop_dong || '...'}`}
-                <span className="block mt-0.5 opacity-80">Tầng {rental.room.tang} • {rental.room.dien_tich}m²</span>
+                {rental.chu_hop_dong?.full_name === userFullName ? 'Người đứng tên chính' : `Đại diện: ${rental.chu_hop_dong?.full_name || '...'}`}
+                <span className="block mt-0.5 opacity-80">Tầng {rental.room.tang || rental.room.floor || 1} • {rental.room.area_sqm || rental.room.dien_tich}m²</span>
               </p>
             </div>
             <div className="text-right">
-              <p className="text-2xl font-serif text-white">{rental.room.gia_phong?.toLocaleString('vi-VN')}₫</p>
+              <p className="text-2xl font-serif text-white">{(rental.room.price || rental.room.gia_phong || 0).toLocaleString('vi-VN')}₫</p>
               <p className="text-[10px] text-white/60 uppercase tracking-widest font-medium">Giá thuê / tháng</p>
             </div>
           </div>
@@ -69,22 +69,6 @@ export function RoomCard({ rental, userFullName, bgImg, roomInvoices = [], roomR
       {/* Bottom Content Section (Specific Room Items) */}
       <div className="flex-1 p-6 flex flex-col gap-5 bg-cream-50/30">
         
-        {/* Contract Actions if needed */}
-        {rental.assignment.file_hop_dong && (
-          <div className="flex items-center justify-between pb-4 border-b border-wood-100">
-            <span className="text-xs uppercase tracking-widest font-semibold text-charcoal-500">Hợp đồng</span>
-            {rental.assignment.trang_thai_ky === 'Đã ký' ? (
-              <button onClick={() => onDownloadContract(rental.assignment.id)} className="flex items-center gap-1.5 text-xs font-medium text-wood-600 hover:text-wood-800 transition-colors">
-                <Download className="w-3.5 h-3.5" /> Tải về
-              </button>
-            ) : (
-              <button onClick={() => onSignContract(rental.assignment.id)} className="flex items-center gap-1.5 text-xs font-semibold text-white bg-wood-500 hover:bg-wood-600 px-4 py-1.5 rounded-full shadow-sm transition-colors">
-                <PenTool className="w-3.5 h-3.5" /> Ký HĐ ngay
-              </button>
-            )}
-          </div>
-        )}
-
         {/* Room Specific Invoices & Repairs */}
         {!hasActionItems ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-6 mt-auto">

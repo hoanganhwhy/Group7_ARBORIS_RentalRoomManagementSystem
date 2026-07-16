@@ -47,7 +47,7 @@ export default function NotificationsAdmin({ onNavigate }: { onNavigate?: (page:
     setLoading(true);
     try {
       const isArchive = viewMode === 'archive';
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/notifications/my?archive=${isArchive}&page=${page}&limit=${limit}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/my?archive=${isArchive}&page=${page}&limit=${limit}`, {
         credentials: 'include'
       });
       if(res.ok) {
@@ -131,7 +131,7 @@ export default function NotificationsAdmin({ onNavigate }: { onNavigate?: (page:
     e.stopPropagation();
     if (!confirm('Xóa thông báo này vào mục lưu trữ?')) return;
     try {
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/notifications/${id}`, {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}`, {
         method: 'DELETE',
         credentials: 'include'
       });
@@ -144,7 +144,7 @@ export default function NotificationsAdmin({ onNavigate }: { onNavigate?: (page:
   async function handleRestore(e: React.MouseEvent, id: number) {
     e.stopPropagation();
     try {
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001/api'}/notifications/${id}/restore`, {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/notifications/${id}/restore`, {
         method: 'PATCH',
         credentials: 'include'
       });

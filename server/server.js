@@ -394,6 +394,7 @@ const mapInvoice = (i) => {
     water_cost: i.tien_nuoc,
     other_fees: i.chi_phi_khac,
     total_amount: i.tong_tien,
+    paid_amount: i.da_thanh_toan,
     status: i.trang_thai,
     due_date: i.han_thanh_toan,
     paid_date: i.ngay_thanh_toan,
@@ -948,18 +949,7 @@ app.post('/api/tenants', async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [id, full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes]);
 
-    // Automatically create a user account for the tenant
-    try {
-      const defaultPassword = 'password123';
-      const hash = await bcrypt.hash(defaultPassword, 10);
-      const username = id; // Enforce username to be exactly the tenant ID
-      await run(`
-        INSERT INTO users (id, username, password_hash, role, tenant_id, full_name, phone, email)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `, [id, username, hash, 'TENANT', id, full_name, phone, email]);
-    } catch (userErr) {
-      console.error('Failed to create user account for tenant:', userErr);
-    }
+
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [id]);
     res.status(201).json(mapTenant(tenant));
@@ -991,19 +981,39 @@ app.put('/api/tenants/:id', async (req, res) => {
       WHERE id = ?
     `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, updated.lien_he_khan_cap, updated.ghi_chu, req.params.id]);
 
-    // Sync to users table
+    // Handle account operations
     try {
-      await run(`
-        UPDATE users 
-        SET full_name = ?, phone = ?, email = ?, cccd = ?, date_of_birth = ?, address = ?
-        WHERE tenant_id = ?
-      `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, req.params.id]);
+      if (req.body.username === null && req.body.password === null) {
+        // Remove account
+        await run('DELETE FROM users WHERE tenant_id = ?', [req.params.id]);
+      } else if (req.body.username && req.body.password) {
+        // Generate account (create new or replace)
+        const hash = await bcrypt.hash(req.body.password, 10);
+        const userId = req.params.id; // user id = tenant id
+        await run(`
+          INSERT OR REPLACE INTO users (id, username, password_hash, role, tenant_id, full_name, phone, email)
+          VALUES (?, ?, ?, 'TENANT', ?, ?, ?, ?)
+        `, [userId, req.body.username, hash, req.params.id, updated.ho_ten, updated.so_dien_thoai, updated.email]);
+      } else if (req.body.password) {
+        // Reset password
+        const hash = await bcrypt.hash(req.body.password, 10);
+        await run('UPDATE users SET password_hash = ? WHERE tenant_id = ?', [hash, req.params.id]);
+      } else {
+        // Normal sync
+        await run(`
+          UPDATE users 
+          SET full_name = ?, phone = ?, email = ?, cccd = ?, date_of_birth = ?, address = ?
+          WHERE tenant_id = ?
+        `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, req.params.id]);
+      }
     } catch (e) {
       console.error('Failed to sync tenant update to user account:', e);
     }
 
     const tenant = await queryOne('SELECT khach_thue.*, users.username FROM khach_thue LEFT JOIN users ON khach_thue.id = users.tenant_id WHERE khach_thue.id = ?', [req.params.id]);
-    res.json(mapTenant(tenant));
+    const responseData = mapTenant(tenant);
+    if (req.body.password && req.body.password !== null) responseData.password = req.body.password;
+    res.json(responseData);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1341,6 +1351,84 @@ app.delete('/api/meter_readings/:id', async (req, res) => {
 });
 
 
+app.get('/api/tenant/portal', async (req, res) => {
+  try {
+    const { tenant_id } = req.query;
+    if (!tenant_id) return res.status(400).json({ error: 'Missing tenant_id' });
+
+    const assignments = await query('SELECT * FROM hop_dong_thue WHERE khach_thue_id = ? AND dang_hoat_dong = 1', [tenant_id]);
+    
+    const rentals = [];
+    for (const assignment of assignments) {
+      const room = await queryOne('SELECT p.*, n.ten_nha_tro as area_name FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE p.id = ?', [assignment.phong_id]);
+      const dien_nuoc_info = await queryOne('SELECT * FROM chi_so_dien_nuoc WHERE phong_id = ? ORDER BY ngay_ghi_so DESC LIMIT 1', [assignment.phong_id]);
+      const chu_hop_dong = await queryOne(`
+        SELECT k.* FROM khach_thue k 
+        JOIN hop_dong_thue h ON k.id = h.khach_thue_id 
+        WHERE h.phong_id = ? AND h.la_nguoi_dai_dien = 1 AND h.dang_hoat_dong = 1
+      `, [assignment.phong_id]);
+      const so_nguoi_o = (await queryOne('SELECT COUNT(*) as count FROM hop_dong_thue WHERE phong_id = ? AND dang_hoat_dong = 1', [assignment.phong_id]))?.count || 0;
+
+      rentals.push({
+        assignment: { ...assignment, room_id: assignment.phong_id, tenant_id: assignment.khach_thue_id },
+        room: room ? {
+            id: room.id,
+            room_number: room.so_phong,
+            price: room.gia_phong || room.gia_thue || 0,
+            area: room.area_name || 'Nhà Trọ',
+            area_sqm: room.dien_tich,
+            tang: room.tang || 1,
+            image_url: room.anh_dai_dien || null,
+            status: room.trang_thai,
+            amenities: room.tien_nghi ? JSON.parse(room.tien_nghi) : [],
+            max_occupants: room.so_nguoi_toi_da,
+            deposit_amount: room.tien_coc,
+            notes: room.ghi_chu
+        } : null,
+        dien_nuoc_info,
+        chu_hop_dong: chu_hop_dong ? {
+            id: chu_hop_dong.id,
+            full_name: chu_hop_dong.ho_ten,
+            phone: chu_hop_dong.so_dien_thoai
+        } : null,
+        so_nguoi_o
+      });
+    }
+
+    let unpaidInvoices = [];
+    if (rentals.length > 0) {
+      const roomIds = rentals.map(r => r.room?.id).filter(Boolean);
+      if (roomIds.length > 0) {
+        unpaidInvoices = await query(`
+          SELECT * FROM hoa_don 
+          WHERE trang_thai != 'paid' AND phong_id IN (${roomIds.map(() => '?').join(',')})
+        `, roomIds);
+        unpaidInvoices = unpaidInvoices.map(inv => ({
+            id: inv.id,
+            room_id: inv.phong_id,
+            month: inv.thang_hoa_don,
+            year: inv.nam_hoa_don,
+            base_rent: inv.tien_phong,
+            electricity_cost: inv.tien_dien,
+            water_cost: inv.tien_nuoc,
+            internet_cost: inv.tien_internet || 0,
+            cleaning_cost: inv.tien_ve_sinh || 0,
+            other_costs: inv.chi_phi_khac,
+            total_amount: inv.tong_tien,
+            paid_amount: inv.da_thanh_toan,
+            status: inv.trang_thai,
+            due_date: inv.han_thanh_toan,
+            created_at: inv.ngay_tao
+        }));
+      }
+    }
+
+    res.json({ rentals, unpaidInvoices });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ----------------- INVOICES API -----------------
 app.get('/api/invoices', async (req, res) => {
   try {
@@ -1508,7 +1596,7 @@ app.get('/api/invoices/:id', async (req, res) => {
     if (bankId && accountNumber && accountName) {
       const baseUrl = `https://img.vietqr.io/image/${encodeURIComponent(bankId)}-${encodeURIComponent(accountNumber)}-compact2.png`;
       const parameters = new URLSearchParams({
-        amount: String(item.tong_tien),
+        amount: String(Math.max(0, item.tong_tien - (item.da_thanh_toan || 0))),
         addInfo: item.ma_hoa_don,
         accountName
       });
@@ -2083,17 +2171,24 @@ app.post('/api/webhooks/sepay', async (req, res) => {
       return res.json({ success: true, matched: false, reason: "INVOICE_NOT_FOUND" });
     }
 
-    if (Number(transferAmount) !== Number(invoice.tong_tien)) {
-      return res.json({ success: true, matched: false, reason: "AMOUNT_MISMATCH" });
+    const paidSoFar = (Number(invoice.da_thanh_toan) || 0) + Number(transferAmount);
+    const isFullyPaid = paidSoFar >= Number(invoice.tong_tien);
+
+    if (isFullyPaid) {
+      await run(`
+        UPDATE hoa_don
+        SET trang_thai = 'paid', da_thanh_toan = ?, ngay_thanh_toan = CURRENT_TIMESTAMP, ngay_cap_nhat = CURRENT_TIMESTAMP
+        WHERE id = ? AND trang_thai != 'paid'
+      `, [paidSoFar, invoice.id]);
+    } else {
+      await run(`
+        UPDATE hoa_don
+        SET da_thanh_toan = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+        WHERE id = ? AND trang_thai != 'paid'
+      `, [paidSoFar, invoice.id]);
     }
 
-    await run(`
-      UPDATE hoa_don
-      SET trang_thai = 'paid', ngay_thanh_toan = CURRENT_TIMESTAMP, ngay_cap_nhat = CURRENT_TIMESTAMP
-      WHERE id = ? AND trang_thai != 'paid' AND tong_tien = ?
-    `, [invoice.id, Number(transferAmount)]);
-
-    return res.json({ success: true, matched: true, invoiceId: invoice.id, paymentStatus: "PAID" });
+    return res.json({ success: true, matched: true, invoiceId: invoice.id, paymentStatus: isFullyPaid ? "PAID" : "PARTIALLY_PAID" });
 
   } catch (error) {
     console.error('SePay Webhook Error:', error);

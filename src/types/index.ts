@@ -90,6 +90,7 @@ export interface Invoice {
   water_cost: number;
   other_fees: number;
   total_amount: number;
+  paid_amount?: number;
   status: 'pending' | 'paid' | 'overdue' | 'waiting_confirmation';
   due_date: string | null;
   paid_date: string | null;
@@ -142,4 +143,4 @@ export interface RoommateRequest {
   so_dien_thoai?: string | null;
 }
 
-export type Page = 'dashboard' | 'rooms' | 'tenants' | 'tenant-accounts' | 'user-management' | 'meter-readings' | 'invoices' | 'repairs' | 'roommates' | 'notifications' | 'chat';
+export type Page = 'dashboard' | 'rooms' | 'tenants' | 'tenant-accounts' | 'meter-readings' | 'invoices' | 'repairs' | 'roommates' | 'notifications';
