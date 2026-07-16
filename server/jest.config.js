@@ -7,6 +7,8 @@ export default {
     '/node_modules/',
     '/src/controllers/ai.controller.js',
     '/src/ai/prompts.js',
-    '/contracts.js'
+    '/contracts.js',
+    '/server.js',
+    '/integrated-routes.js'
   ]
 };
