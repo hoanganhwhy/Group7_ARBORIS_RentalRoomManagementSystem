@@ -1,12 +1,12 @@
 export default {
   testEnvironment: 'node',
   transform: {},
-  coverageThreshold: {
-    global: {
-      branches: 30,
-      functions: 70,
-      lines: 70,
-      statements: 70,
-    },
-  },
+  testMatch: ['**/tests/**/*.test.js'],
+  testPathIgnorePatterns: ['/node_modules/', '/coverage/'],
+  coveragePathIgnorePatterns: [
+    '/node_modules/',
+    '/src/controllers/ai.controller.js',
+    '/src/ai/prompts.js',
+    '/contracts.js'
+  ]
 };

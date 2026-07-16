@@ -1,0 +1,16 @@
+ARBORIS VietQR fix
+
+Root cause fixed:
+- Older invoices could have an empty ma_hoa_don, so the payment page had no transfer content.
+- Because paymentContent was empty, the local QR generator never ran and every fallback failed.
+
+Changes:
+- Backend now generates and persists a payment code for old invoices when they are opened.
+- Frontend always derives a fallback HM payment code from invoice id.
+- Local VietQR is rendered as inline SVG, not as an image URL.
+- External VietQR servers are fallback only.
+
+Run:
+1. npm install
+2. npm run dev:all
+3. Open http://localhost:5173 and press Ctrl+Shift+R once.

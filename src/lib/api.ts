@@ -1,6 +1,46 @@
-import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest } from '../types';
+import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest, RoommateRequest } from '../types';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+export interface PaginationParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalItems: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+  unreadCount?: number;
+}
+
+const BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
+function getHeaders(): Record<string, string> {
+  return { 'Content-Type': 'application/json' };
+}
+
+function asPaginated<T>(value: PaginatedResponse<T> | T[]): PaginatedResponse<T> {
+  if (!Array.isArray(value)) return value;
+  return {
+    data: value,
+    pagination: {
+      page: 1,
+      limit: value.length || 1,
+      totalItems: value.length,
+      totalPages: 1,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    },
+  };
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = {
@@ -11,10 +51,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers,
+    credentials: 'include'
   });
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+    }
     throw new Error(errData.error || `HTTP error! status: ${response.status}`);
   }
 
@@ -26,8 +70,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 // Rooms API
-export async function getRooms(): Promise<Room[]> {
-  return request<Room[]>('/rooms');
+export async function getRooms(params?: PaginationParams): Promise<PaginatedResponse<Room>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return asPaginated(await request<PaginatedResponse<Room> | Room[]>(`/rooms${query}`));
 }
 
 export async function getRoom(id: string): Promise<Room | null> {
@@ -54,9 +99,31 @@ export async function deleteRoom(id: string): Promise<void> {
   });
 }
 
+// Users API
+export async function getAdminUsers(params?: PaginationParams): Promise<PaginatedResponse<any>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return request<PaginatedResponse<any>>(`/admin/users${query}`);
+}
+
+export async function createTenantUser(username: string, password: string, full_name: string, phone: string): Promise<any> {
+  return request<any>('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, full_name, phone })
+  });
+}
+
+// AI API
+export async function sendAiMessage(message: string, role: string, tenantId?: string, history: any[] = []): Promise<{ reply: string }> {
+  return request<{ reply: string }>('/ai/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message, role, tenant_id: tenantId, history })
+  });
+}
+
 // Tenants API
-export async function getTenants(): Promise<Tenant[]> {
-  return request<Tenant[]>('/tenants');
+export async function getTenants(params?: PaginationParams): Promise<PaginatedResponse<Tenant>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return asPaginated(await request<PaginatedResponse<Tenant> | Tenant[]>(`/tenants${query}`));
 }
 
 export async function getTenant(id: string): Promise<Tenant | null> {
@@ -132,8 +199,9 @@ export async function getExpiringContracts(withinDays: number = 30): Promise<Roo
 }
 
 // Meter Readings API
-export async function getMeterReadings(): Promise<MeterReading[]> {
-  return request<MeterReading[]>('/meter_readings');
+export async function getMeterReadings(params?: PaginationParams): Promise<PaginatedResponse<MeterReading>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return asPaginated(await request<PaginatedResponse<MeterReading> | MeterReading[]>(`/meter_readings${query}`));
 }
 
 export async function getMeterReadingsByRoom(roomId: string): Promise<MeterReading[]> {
@@ -165,8 +233,9 @@ export async function deleteMeterReading(id: string): Promise<void> {
 }
 
 // Invoices API
-export async function getInvoices(): Promise<Invoice[]> {
-  return request<Invoice[]>('/invoices');
+export async function getInvoices(params?: PaginationParams): Promise<PaginatedResponse<Invoice>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return asPaginated(await request<PaginatedResponse<Invoice> | Invoice[]>(`/invoices${query}`));
 }
 
 export async function getInvoice(id: string): Promise<Invoice | null> {
@@ -206,8 +275,9 @@ export async function markInvoicePaid(id: string): Promise<Invoice> {
 }
 
 // Repair Requests API
-export async function getRepairRequests(): Promise<RepairRequest[]> {
-  return request<RepairRequest[]>('/repair_requests');
+export async function getRepairRequests(params?: PaginationParams): Promise<PaginatedResponse<RepairRequest>> {
+  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
+  return asPaginated(await request<PaginatedResponse<RepairRequest> | RepairRequest[]>(`/repair_requests${query}`));
 }
 
 export async function getRepairRequest(id: string): Promise<RepairRequest | null> {
@@ -234,15 +304,75 @@ export async function deleteRepairRequest(id: string): Promise<void> {
   });
 }
 
+// Authenticated tenant repair API. The backend derives tenant_id from the
+// signed-in account, so a request cannot be attached to the wrong tenant.
+export async function getMyRepairRequests(): Promise<RepairRequest[]> {
+  return request<RepairRequest[]>('/tenant/repair_requests');
+}
+
+export async function createMyRepairRequest(requestData: {
+  room_id: string;
+  title: string;
+  description?: string;
+  priority?: RepairRequest['priority'];
+}): Promise<RepairRequest> {
+  return request<RepairRequest>('/tenant/repair_requests', {
+    method: 'POST',
+    body: JSON.stringify(requestData),
+  });
+}
+
+export async function updateMyRepairRequest(
+  id: string,
+  requestData: Pick<RepairRequest, 'title' | 'priority'> & { description?: string },
+): Promise<RepairRequest> {
+  return request<RepairRequest>(`/tenant/repair_requests/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(requestData),
+  });
+}
+
+export async function deleteMyRepairRequest(id: string): Promise<void> {
+  return request<void>(`/tenant/repair_requests/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// Roommate Requests API
+export async function getRoommateRequests(): Promise<RoommateRequest[]> {
+  return request<RoommateRequest[]>('/roommates');
+}
+
+export async function getMyRoommateRequests(): Promise<RoommateRequest[]> {
+  return request<RoommateRequest[]>('/roommates/my-requests');
+}
+
+export async function createRoommateRequest(data: { tieu_de: string; mo_ta?: string; gia_chia_se: number }): Promise<RoommateRequest> {
+  return request<RoommateRequest>('/roommates', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function closeRoommateRequest(id: number): Promise<{ success: boolean; message: string }> {
+  return request<{ success: boolean; message: string }>(`/roommates/${id}/close`, {
+    method: 'PUT',
+  });
+}
+
 // Dashboard stats
 export async function getDashboardStats() {
-  const [rooms, tenants, invoices, repairs, expiringContracts] = await Promise.all([
-    getRooms(),
-    getTenants(),
-    getInvoices(),
-    getRepairRequests(),
-    getExpiringContracts(30),
+  const [roomsRes, tenantsRes, invoicesRes, repairsRes] = await Promise.all([
+    getRooms({ limit: 10000 }),
+    getTenants({ limit: 10000 }),
+    getInvoices({ limit: 10000 }),
+    getRepairRequests({ limit: 10000 }),
   ]);
+
+  const rooms = roomsRes.data || [];
+  const tenants = tenantsRes.data || [];
+  const invoices = invoicesRes.data || [];
+  const repairs = repairsRes.data || [];
 
   const totalRevenue = invoices
     .filter(i => i.status === 'paid')
@@ -257,11 +387,7 @@ export async function getDashboardStats() {
 
   const pendingRepairs = repairs.filter(r => r.status === 'new' || r.status === 'in_progress').length;
 
-  const missingIdTenants = tenants.filter(t => !t.id_card_number || t.id_card_number.length < 9).length;
-
   return {
-    expiringContracts,
-    missingIdTenants,
     totalRooms: rooms.length,
     occupiedRooms,
     availableRooms,
@@ -272,7 +398,170 @@ export async function getDashboardStats() {
     pendingInvoices: invoices.filter(i => i.status === 'pending').length,
     overdueInvoices: invoices.filter(i => i.status === 'overdue').length,
     pendingRepairs,
-    recentRepairs: repairs.slice(0, 5),
-    recentInvoices: invoices.slice(0, 5),
+    recentRepairs: repairs.filter((r) => r.status !== 'closed').slice(0, 5),
+    recentInvoices: invoices.filter((i) => i.status !== 'paid').slice(0, 5),
   };
+}
+
+export async function reportPayment(invoiceId: string) {
+  const res = await fetch(`${BASE_URL}/invoices/${invoiceId}/report-payment`, {
+    method: 'POST',
+    headers: getHeaders(),
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error('Failed to report payment');
+  return res.json();
+}
+
+export async function confirmPayment(invoiceId: string) {
+  const res = await fetch(`${BASE_URL}/admin/invoices/${invoiceId}/confirm-payment`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    credentials: 'include',
+  });
+  if (!res.ok) throw new Error('Failed to confirm payment');
+  return res.json();
+}
+
+// --- REPAIR REQUESTS ---
+export async function getSettings() {
+  const res = await fetch(`${BASE_URL}/settings`, { headers: getHeaders(), credentials: 'include' });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Failed to fetch settings (status ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function updateSettings(data: any) {
+  const res = await fetch(`${BASE_URL}/settings`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    credentials: 'include',
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to update settings');
+  return res.json();
+}
+
+// --- NOTIFICATIONS API ---
+export async function getNotifications(params?: PaginationParams & { archive?: boolean }): Promise<PaginatedResponse<any>> {
+  const queryParams: any = { ...params };
+  if (params?.archive) queryParams.archive = 'true';
+  const query = `?${new URLSearchParams(queryParams).toString()}`;
+  return request<PaginatedResponse<any>>(`/notifications/my${query}`);
+}
+
+export async function getNotificationDetail(id: number): Promise<any> {
+  return request<any>(`/notifications/${id}`);
+}
+
+export async function sendNotification(data: { title: string, content: string, targetType: 'all'|'personal', targetTenantId?: string }): Promise<any> {
+  return request<any>('/notifications', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
+}
+
+export async function replyNotification(id: number, content: string): Promise<any> {
+  return request<any>(`/notifications/${id}/replies`, {
+    method: 'POST',
+    body: JSON.stringify({ content })
+  });
+}
+
+export async function markNotificationAsRead(id: number): Promise<any> {
+  return request<any>(`/notifications/${id}/read`, {
+    method: 'PATCH'
+  });
+}
+
+export async function deleteNotification(id: number): Promise<any> {
+  return request<any>(`/notifications/${id}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function restoreNotification(id: number): Promise<any> {
+  return request<any>(`/notifications/${id}/restore`, {
+    method: 'PATCH'
+  });
+}
+
+// --- FRIENDS API ---
+export async function getFriends(): Promise<any[]> {
+  return request<any[]>('/friends');
+}
+
+export async function sendFriendRequest(phone_number: string): Promise<any> {
+  return request<any>('/friends/request', {
+    method: 'POST',
+    body: JSON.stringify({ phone_number })
+  });
+}
+
+export async function respondFriendRequest(request_id: string, action: 'accept' | 'reject'): Promise<any> {
+  return request<any>('/friends/respond', {
+    method: 'PUT',
+    body: JSON.stringify({ request_id, action })
+  });
+}
+
+// --- CHAT API ---
+export async function getChatMessages(isGroup: boolean, archive: boolean = false, receiverId?: string, params?: PaginationParams): Promise<PaginatedResponse<any>> {
+  const queryParams: any = { is_group: isGroup.toString(), archive: archive.toString(), ...params };
+  if (receiverId) {
+    queryParams.receiver_id = receiverId;
+  }
+  const query = new URLSearchParams(queryParams).toString();
+  return request<PaginatedResponse<any>>(`/chat?${query}`);
+}
+
+export async function sendChatMessage(content: string, isGroup: boolean, receiverId?: string): Promise<any> {
+  return request<any>('/chat', {
+    method: 'POST',
+    body: JSON.stringify({ content, is_group: isGroup, receiver_id: receiverId })
+  });
+}
+
+export async function deleteChatMessage(id: number): Promise<any> {
+  return request<any>(`/chat/${id}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function restoreChatMessage(id: number): Promise<any> {
+  return request<any>(`/chat/${id}/restore`, {
+    method: 'PATCH'
+  });
+}
+export async function loginUser(data: any): Promise<any> {
+  return request<any>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  });
+}
+
+export async function changePassword(oldPassword: string, newPassword: string): Promise<any> {
+  return request<any>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ oldPassword, newPassword })
+  });
+}
+
+export async function getBadges(): Promise<{ chat: number, notifications: number, invoices: number, repairs: number }> {
+  return request<{ chat: number, notifications: number, invoices: number, repairs: number }>('/badges');
+}
+
+export async function loginGoogle(token: string): Promise<any> {
+  return request<any>('/auth/google-login', {
+    method: 'POST',
+    body: JSON.stringify({ token })
+  });
+}
+
+export async function generateContract(assignmentId: string): Promise<any> {
+  return request<any>(`/contracts/${assignmentId}/generate`, {
+    method: 'POST'
+  });
 }

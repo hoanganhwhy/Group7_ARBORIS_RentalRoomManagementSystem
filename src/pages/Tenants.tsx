@@ -1,31 +1,8 @@
-import { useEffect, useState, useRef } from 'react';
-import { 
-  PiPlusLight, 
-  PiUsersLight, 
-  PiPencilSimpleLight, 
-  PiTrashLight, 
-  PiPhoneLight, 
-  PiEnvelopeSimpleLight, 
-  PiHouseLineLight, 
-  PiCrownLight, 
-  PiSignOutLight, 
-  PiUserPlusLight, 
-  PiMagnifyingGlassLight, 
-  PiEyeLight, 
-  PiEyeSlashLight,
-  PiIdentificationCardLight,
-  PiCaretDownLight,
-  PiCheckLight,
-  PiFadersLight,
-  PiDownloadSimpleLight,
-  PiXLight,
-  PiCheckSquareLight,
-  PiSquareLight
-} from 'react-icons/pi';
+import { useEffect, useState } from 'react';
+import { Plus, Users, Edit2, Trash2, Phone, Mail, Home, Crown, LogOut, UserPlus, Eye, EyeOff } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
-import { FilterDropdown } from '../components/ui/FilterDropdown';
 import { Button } from '../components/ui/Button';
-import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { Input, Spinner, EmptyState } from '../components/ui/Input';
 import {
   getTenants,
   createTenant,
@@ -34,9 +11,13 @@ import {
   getRooms,
   assignTenantToRoom,
   endRoomAssignment,
-  getInvoices,
+  getExpiringContracts,
 } from '../lib/api';
-import type { Tenant, Room, RoomAssignment, Invoice } from '../types';
+
+import type { Tenant, Room, RoomAssignment } from '../types';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
 
 const countryCodes = [
   { code: '+84', label: 'VN (+84)' },
@@ -65,7 +46,6 @@ function parsePhone(phone: string) {
   return { countryCode: '+84', body: phone };
 }
 
-
 export function Tenants() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -77,17 +57,20 @@ export function Tenants() {
   const [deletingTenant, setDeletingTenant] = useState<Tenant | null>(null);
   const [assigningTenant, setAssigningTenant] = useState<Tenant | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [roomFilter, setRoomFilter] = useState('all');
-  const [debtFilter, setDebtFilter] = useState('all');
-  const [legalFilter, setLegalFilter] = useState('all');
-  const [selectedTenants, setSelectedTenants] = useState<Set<string>>(new Set());
-  const [primaryFilter, setPrimaryFilter] = useState<'all' | 'primary' | 'non_primary'>('all');
-  const [sortBy, setSortBy] = useState<'name_asc' | 'expiration_asc'>('name_asc');
   const [visiblePhones, setVisiblePhones] = useState<Set<string>>(new Set());
   const [visibleEmails, setVisibleEmails] = useState<Set<string>>(new Set());
   const [visibleIDs, setVisibleIDs] = useState<Set<string>>(new Set());
+  
+  const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterArea, setFilterArea] = useState<string>('all');
+  const [filterRent, setFilterRent] = useState<string>('all');
+  const [filterOccupants, setFilterOccupants] = useState<string>('all');
+  const [filterExpiring, setFilterExpiring] = useState<boolean>(false);
+  const [expiringContracts, setExpiringContracts] = useState<RoomAssignment[]>([]);
+
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -118,39 +101,22 @@ export function Tenants() {
   const [saving, setSaving] = useState(false);
   const parsedPhone = parsePhone(formData.phone);
 
-  useEffect(() => {
-    loadData();
-    
-    const handleOpenModal = (e: any) => {
-      if (e.detail?.action === 'new-tenant') {
-        setEditingTenant(null);
-        setIsModalOpen(true);
-      }
-    };
-
-    const handleApplyFilter = (e: any) => {
-      if (e.detail?.filterKey === 'legalFilter') {
-        setLegalFilter(e.detail.filterValue);
-        setShowAdvancedFilters(true);
-      } else if (e.detail?.filterKey === 'sortBy') {
-        setSortBy(e.detail.filterValue);
-        setShowAdvancedFilters(true);
-      }
-    };
-
-    window.addEventListener('open-modal', handleOpenModal);
-    window.addEventListener('apply-filter', handleApplyFilter);
-    return () => {
-      window.removeEventListener('open-modal', handleOpenModal);
-      window.removeEventListener('apply-filter', handleApplyFilter);
-    };
-  }, []);
+  // loadData uses the dependencies listed below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadData(); }, [page, limit, searchQuery]);
 
   async function loadData() {
     try {
-      const [tenantsData, roomsData] = await Promise.all([getTenants(), getRooms()]);
-      setTenants(tenantsData);
-      setRooms(roomsData);
+      setLoading(true);
+      const [tenantsData, roomsData, expiringData] = await Promise.all([
+        getTenants({ page, limit, search: searchQuery }), 
+        getRooms({ limit: 100 }), // Lấy đủ phòng để mapping
+        getExpiringContracts(30).catch(() => [] as RoomAssignment[])
+      ]);
+      setTenants(tenantsData.data || []);
+      setPagination(tenantsData.pagination);
+      setRooms(roomsData.data || []);
+      setExpiringContracts(expiringData);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -158,16 +124,17 @@ export function Tenants() {
     }
   }
 
-  function getTenantAssignments(tenantId: string): { room: Room; assignment: RoomAssignment }[] {
-    const assignments: { room: Room; assignment: RoomAssignment }[] = [];
+  // Reset trang khi thay đổi search
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, filterFloor, filterArea, filterRent, filterOccupants, filterExpiring]);
+
+  function getTenantAssignment(tenantId: string): { room: Room; assignment: RoomAssignment } | null {
     for (const room of rooms) {
-      if (room.active_assignments) {
-        room.active_assignments.filter((a) => a.tenant_id === tenantId).forEach((a) => {
-          assignments.push({ room, assignment: a });
-        });
-      }
+      const found = room.active_assignments?.find((a) => a.tenant_id === tenantId);
+      if (found) return { room, assignment: found };
     }
-    return assignments;
+    return null;
   }
 
   function toggle(set: Set<string>, setFn: (s: Set<string>) => void, id: string) {
@@ -181,44 +148,6 @@ export function Tenants() {
     return '•'.repeat(Math.min(value.length - visibleEnd, 8)) + value.slice(-visibleEnd);
   }
 
-  function exportCSV() {
-    const data = filteredTenants.filter(t => selectedTenants.has(t.id));
-    if (data.length === 0) return;
-    
-    const headers = ['Họ tên', 'Số điện thoại', 'Email', 'CCCD/CMND', 'Phòng', 'Vai trò'];
-    const rows = data.map(t => {
-      const infos = getTenantAssignments(t.id);
-        const roomStr = infos.length > 0 ? infos.map(i => i.room.room_number).join(', ') : 'Chưa xếp phòng';
-        const roleStr = infos.some(i => i.assignment.is_primary) ? 'Chủ hộ' : (infos.length > 0 ? 'Thành viên' : '');
-      return [t.full_name, t.phone || '', t.email || '', t.id_card_number || '', roomStr, roleStr];
-    });
-    
-    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
-      + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-      
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `danh_sach_nguoi_thue_${new Date().getTime()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
-
-  function toggleTenantSelection(id: string) {
-    const next = new Set(selectedTenants);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    setSelectedTenants(next);
-  }
-
-  function toggleAllSelection() {
-    if (selectedTenants.size === filteredTenants.length) {
-      setSelectedTenants(new Set());
-    } else {
-      setSelectedTenants(new Set(filteredTenants.map(t => t.id)));
-    }
-  }
-
   function maskEmail(email: string): string {
     if (!email) return email;
     const [local, domain] = email.split('@');
@@ -227,62 +156,52 @@ export function Tenants() {
     return visible + '•'.repeat(Math.min(local.length - visible.length, 6)) + '@' + domain;
   }
 
-  let filteredTenants = tenants.filter((t) => {
-    // 1. Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase().replace(/\D/g, '') || searchQuery.toLowerCase();
-      const nameMatch = t.full_name.toLowerCase().includes(searchQuery.toLowerCase());
-      const queryDigits = searchQuery.replace(/\D/g, '');
-      const phoneMatch = t.phone
-        ? (queryDigits && t.phone.replace(/\D/g, '').includes(queryDigits)) ||
-          t.phone.toLowerCase().includes(searchQuery.toLowerCase())
-        : false;
-      if (!nameMatch && !phoneMatch) return false;
+  const filteredTenants = tenants.filter((t) => {
+    if (!searchQuery) return true;
+    const nameMatch = t.full_name.toLowerCase().includes(searchQuery.toLowerCase());
+    const phoneMatch = t.phone
+      ? t.phone.replace(/\D/g, '').includes(searchQuery.replace(/\D/g, '')) ||
+        t.phone.includes(searchQuery)
+      : false;
+    const matchesSearch = nameMatch || phoneMatch;
+
+    const info = getTenantAssignment(t.id);
+    const room = info?.room;
+    
+    let matchesFloor = true;
+    if (filterFloor !== 'all') {
+      matchesFloor = room ? room.floor.toString() === filterFloor : false;
+    }
+    
+    let matchesArea = true;
+    if (filterArea !== 'all') {
+      matchesArea = room ? room.area === filterArea : false;
+    }
+    
+    let matchesRent = true;
+    if (filterRent !== 'all') {
+      if (!room) matchesRent = false;
+      else if (filterRent === '1m-2.5m') matchesRent = room.monthly_rent >= 1000000 && room.monthly_rent < 2500000;
+      else if (filterRent === '2.5m-4m') matchesRent = room.monthly_rent >= 2500000 && room.monthly_rent <= 4000000;
+      else if (filterRent === '>4m') matchesRent = room.monthly_rent > 4000000;
     }
 
-    // 2. Primary Tenant Filter
-    if (primaryFilter !== 'all') {
-      const infos = getTenantAssignments(t.id);
-        const isPrimary = infos.some(info => info.assignment.is_primary);
-        if (primaryFilter === 'primary' && !isPrimary) return false;
-        if (primaryFilter === 'non_primary' && (isPrimary || infos.length === 0)) return false;
+    let matchesOccupants = true;
+    if (filterOccupants !== 'all') {
+      if (!room) matchesOccupants = false;
+      else {
+        const numOccupants = room.active_assignments?.length || 0;
+        if (filterOccupants === '5+') {
+          matchesOccupants = numOccupants >= 5;
+        } else {
+          matchesOccupants = numOccupants.toString() === filterOccupants;
+        }
+      }
     }
 
-    // 3. Room Filter
-    if (roomFilter !== 'all') {
-      const infos = getTenantAssignments(t.id);
-        if (!infos.some(info => info.room.id === roomFilter)) return false;
-    }
+    const matchesExpiring = !filterExpiring || expiringContracts.some(ec => ec.tenant_id === t.id);
 
-    // 4. Debt Filter
-    if (debtFilter === 'debt') {
-      const infos = getTenantAssignments(t.id);
-        if (infos.length === 0) return false;
-        const hasDebt = infos.some(info => invoices.some(inv => inv.room_id === info.room.id && (inv.status === 'pending' || inv.status === 'overdue')));
-        if (!hasDebt) return false;
-    }
-
-    // 5. Legal Filter
-    if (legalFilter === 'missing_id') {
-      if (t.id_card_number && t.id_card_number.length >= 9) return false;
-    }
-
-    return true;
-  });
-
-  // 3. Sorting
-  filteredTenants.sort((a, b) => {
-    if (sortBy === 'name_asc') {
-      return a.full_name.localeCompare(b.full_name, 'vi-VN');
-    } else if (sortBy === 'expiration_asc') {
-      const aInfos = getTenantAssignments(a.id);
-        const bInfos = getTenantAssignments(b.id);
-        const getMinDate = (infos: any[]) => Math.min(...infos.map(i => i.assignment.contract_end_date ? new Date(i.assignment.contract_end_date).getTime() : Infinity));
-        const aDate = aInfos.length > 0 ? getMinDate(aInfos) : Infinity;
-        const bDate = bInfos.length > 0 ? getMinDate(bInfos) : Infinity;
-        return aDate - bDate;
-    }
-    return 0;
+    return matchesSearch && matchesArea && matchesFloor && matchesRent && matchesOccupants && matchesExpiring;
   });
 
   function validateField(field: 'phone' | 'email' | 'id_card_number', value: string): string | undefined {
@@ -394,7 +313,7 @@ export function Tenants() {
       }
       await loadData();
       setIsModalOpen(false);
-    } catch (error) {
+    } catch {
       alert('Không thể lưu thông tin. Vui lòng thử lại.');
     } finally {
       setSaving(false);
@@ -426,11 +345,11 @@ export function Tenants() {
   }
 
   async function handleCheckout(assignment: RoomAssignment) {
-    if (!confirm('Xác nhận trả phòng?')) return;
+    if (!confirm('Xác nhận trả phòng?\nLƯU Ý: Khách đã thông báo trước 30 ngày chưa? (Nếu chưa, bạn có thể tự thỏa thuận trừ cọc theo quy định trước khi xác nhận).')) return;
     try {
       await endRoomAssignment(assignment.id);
       await loadData();
-    } catch (error) {
+    } catch {
       alert('Không thể trả phòng. Vui lòng thử lại.');
     }
   }
@@ -441,7 +360,7 @@ export function Tenants() {
       await deleteTenant(deletingTenant.id);
       await loadData();
       setIsDeleteModalOpen(false);
-    } catch (error) {
+    } catch {
       alert('Không thể xóa người thuê. Có thể vẫn còn dữ liệu liên quan.');
     }
   }
@@ -456,10 +375,10 @@ export function Tenants() {
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Người thuê</h1>
-          <p className="text-charcoal-400 mt-2 text-sm">Quản lý thông tin khách thuê và hợp đồng</p>
+          <p className="text-charcoal-400 mt-2 text-sm">Quản lý thông tin chi tiết của người thuê và duyệt tài khoản</p>
         </div>
         <Button onClick={openCreateModal}>
-          <PiPlusLight className="w-4 h-4 mr-1" />
+          <Plus className="w-4 h-4" />
           Thêm người thuê
         </Button>
       </header>
@@ -467,261 +386,112 @@ export function Tenants() {
       {tenants.length === 0 ? (
         <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card p-12">
           <EmptyState
-            icon={<PiUsersLight className="w-10 h-10" />}
+            icon={<Users className="w-10 h-10" />}
             title="Chưa có người thuê nào"
             description="Bắt đầu bằng cách thêm thông tin người thuê mới vào hệ thống"
-            action={<Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4 mr-2" />Thêm người thuê</Button>}
+            action={<Button onClick={openCreateModal}><Plus className="w-4 h-4" />Thêm người thuê</Button>}
           />
         </div>
       ) : (
-        <div className="bg-white rounded-3xl border border-cream-200 shadow-soft overflow-hidden">
-          {/* Toolbar */}
-          <div className="p-5 border-b border-cream-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-cream-50/30">
-            <div className="flex flex-1 flex-col sm:flex-row gap-3 w-full">
-              <div className="relative flex-1 max-w-md">
-                <PiMagnifyingGlassLight className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-charcoal-400" />
-                <input
-                  type="text"
-                  placeholder="Tìm theo tên hoặc số điện thoại..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-11 pr-5 py-2.5 text-sm rounded-full border border-charcoal-100 hover:border-charcoal-200 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-800 transition-colors shadow-soft outline-none"
-                />
+        <>
+          {/* Filters & Search */}
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <div className="w-80">
+                <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Tìm theo tên hoặc số điện thoại..." />
               </div>
-              <FilterDropdown 
-                  value={primaryFilter} 
-                  onChange={(val) => setPrimaryFilter(val as any)} 
-                  options={[
-                    { value: 'all', label: 'Tất cả người thuê' },
-                    { value: 'primary', label: 'Chủ hợp đồng' },
-                    { value: 'non_primary', label: 'Thành viên' }
-                  ]}
-                  className="min-w-[180px]"
-                />
-              <FilterDropdown 
-                  value={sortBy} 
-                  onChange={(val) => setSortBy(val as any)} 
-                  options={[
-                    { value: 'name_asc', label: 'Sắp xếp: Tên A-Z' },
-                    { value: 'expiration_asc', label: 'Hết hạn gần nhất' }
-                  ]}
-                  className="min-w-[180px]"
-                />
+              <PageSizeSelector limit={limit} onLimitChange={setLimit} />
             </div>
-              <button
-                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-full border border-charcoal-100 hover:border-charcoal-200 bg-white text-charcoal-800 transition-colors shadow-soft whitespace-nowrap"
-              >
-                <PiFadersLight className="w-4 h-4" />
-                Lọc nâng cao
-              </button>
+            {/* Advanced Filters */}
+            <div className="flex gap-4 items-center bg-white p-3 rounded-xl border border-charcoal-100 shadow-sm flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-charcoal-500 uppercase">Khu vực / Địa chỉ:</span>
+                <select value={filterArea} onChange={(e) => setFilterArea(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+                  <option value="all">Tất cả</option>
+                  {Array.from(new Set(rooms.map(r => r.area).filter(Boolean))).sort().map(a => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-charcoal-500 uppercase">Tầng (đang ở):</span>
+                <select value={filterFloor} onChange={(e) => setFilterFloor(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+                  <option value="all">Tất cả</option>
+                  {Array.from(new Set(rooms.map(r => r.floor))).sort((a,b) => a - b).map(f => (
+                    <option key={f} value={f.toString()}>Tầng {f}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-charcoal-500 uppercase">Giá phòng:</span>
+                <select value={filterRent} onChange={(e) => setFilterRent(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+                  <option value="all">Tất cả</option>
+                  <option value="1m-2.5m">Từ 1 - 2.5 triệu</option>
+                  <option value="2.5m-4m">Từ 2.5 - 4 triệu</option>
+                  <option value=">4m">Trên 4 triệu</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-charcoal-500 uppercase">Số người chung:</span>
+                <select value={filterOccupants} onChange={(e) => setFilterOccupants(e.target.value)} className="text-sm border-none bg-charcoal-50 rounded-lg py-1.5 px-3 focus:ring-0 cursor-pointer">
+                  <option value="all">Tất cả</option>
+                  <option value="1">1 người</option>
+                  <option value="2">2 người</option>
+                  <option value="3">3 người</option>
+                  <option value="4">4 người</option>
+                  <option value="5+">5+ người (Nhóm gia đình)</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-charcoal-700">
+                  <input type="checkbox" checked={filterExpiring} onChange={(e) => setFilterExpiring(e.target.checked)} className="rounded text-amber-500 focus:ring-amber-500" />
+                  Hợp đồng sắp hết hạn
+                </label>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-6">
+            {filteredTenants.map((tenant) => {
+              const info = getTenantAssignment(tenant.id);
+              return (
+                <ContactCard
+                  key={tenant.id}
+                  tenant={tenant}
+                  room={info?.room || null}
+                  assignment={info?.assignment || null}
+                  phoneVisible={visiblePhones.has(tenant.id)}
+                  emailVisible={visibleEmails.has(tenant.id)}
+                  idVisible={visibleIDs.has(tenant.id)}
+                  onTogglePhone={() => toggle(visiblePhones, setVisiblePhones, tenant.id)}
+                  onToggleEmail={() => toggle(visibleEmails, setVisibleEmails, tenant.id)}
+                  onToggleID={() => toggle(visibleIDs, setVisibleIDs, tenant.id)}
+                  maskValue={maskValue}
+                  maskEmail={maskEmail}
+                  onEdit={() => openEditModal(tenant)}
+                  onAssign={() => openAssignModal(tenant)}
+                  onCheckout={() => info && handleCheckout(info.assignment)}
+                  onDelete={() => openDeleteModal(tenant)}
+                />
+              );
+            })}
           </div>
           
-                    
-          {/* Advanced Filters Panel */}
-          {showAdvancedFilters && (
-            <div className="bg-cream-50/50 border-b border-cream-200 p-5 animate-fade-in">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Room Filter */}
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-charcoal-500 uppercase tracking-wider">Phòng / Căn hộ</label>
-                  <FilterDropdown 
-                      value={roomFilter} 
-                      onChange={(val) => setRoomFilter(val)} 
-                      options={[
-                        { value: 'all', label: 'Tất cả phòng' },
-                        ...rooms.map(r => ({ value: r.id, label: `Phòng ${r.room_number}` }))
-                      ]}
-                      className="w-full"
-                    />
-                </div>
-
-                {/* Legal Status Filter */}
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-charcoal-500 uppercase tracking-wider">Giấy tờ Pháp lý</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button 
-                      onClick={() => setLegalFilter('all')}
-                      className={`px-3 py-2.5 text-sm rounded-xl border transition-all ${legalFilter === 'all' ? 'bg-wood-50 border-wood-200 text-wood-700 font-medium shadow-sm' : 'bg-white border-charcoal-100 text-charcoal-600 hover:bg-cream-50'}`}
-                    >
-                      Tất cả
-                    </button>
-                    <button 
-                      onClick={() => setLegalFilter('missing_id')}
-                      className={`px-3 py-2.5 text-sm rounded-xl border transition-all ${legalFilter === 'missing_id' ? 'bg-rose-50 border-rose-200 text-rose-700 font-medium shadow-sm' : 'bg-white border-charcoal-100 text-charcoal-600 hover:bg-cream-50'}`}
-                    >
-                      Thiếu CCCD
-                    </button>
-                  </div>
-                </div>
-
-                {/* Financial Status Filter */}
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-charcoal-500 uppercase tracking-wider">Tình trạng Tài chính</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button 
-                      onClick={() => setDebtFilter('all')}
-                      className={`px-3 py-2.5 text-sm rounded-xl border transition-all ${debtFilter === 'all' ? 'bg-wood-50 border-wood-200 text-wood-700 font-medium shadow-sm' : 'bg-white border-charcoal-100 text-charcoal-600 hover:bg-cream-50'}`}
-                    >
-                      Tất cả
-                    </button>
-                    <button 
-                      onClick={() => setDebtFilter('debt')}
-                      className={`px-3 py-2.5 text-sm rounded-xl border transition-all ${debtFilter === 'debt' ? 'bg-amber-50 border-amber-200 text-amber-700 font-medium shadow-sm' : 'bg-white border-charcoal-100 text-charcoal-600 hover:bg-cream-50'}`}
-                    >
-                      Chưa đóng tiền
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+          {/* Pagination component */}
+          {!loading && filteredTenants.length > 0 && (
+            <Pagination
+              currentPage={page}
+              totalPages={pagination.totalPages}
+              hasNextPage={pagination.hasNextPage}
+              hasPreviousPage={pagination.hasPreviousPage}
+              onPageChange={setPage}
+            />
           )}
-
-{/* Bulk Action Bar */}
-          {selectedTenants.size > 0 && (
-            <div className="bg-wood-50 border-b border-wood-100 px-5 py-3 flex items-center justify-between animate-fade-in">
-              <div className="text-sm text-wood-800 font-medium">
-                Đã chọn <span className="font-bold">{selectedTenants.size}</span> người thuê
-              </div>
-              <Button size="sm" onClick={exportCSV} className="bg-wood-600 hover:bg-wood-700 text-white rounded-full">
-                <PiDownloadSimpleLight className="w-4 h-4 mr-2" />
-                Xuất danh sách (.csv)
-              </Button>
-            </div>
-          )}
-
-          {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-cream-50/50 border-b border-cream-200 text-xs uppercase tracking-widest text-charcoal-500 font-semibold">
-                  <th className="px-4 py-3">Khách Thuê</th>
-                  <th className="px-4 py-3">Phòng</th>
-                  <th className="px-4 py-3">Liên Hệ</th>
-                  <th className="px-4 py-3">Giấy Tờ</th>
-                  <th className="px-4 py-3 text-right">Thao Tác</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-cream-100">
-                {filteredTenants.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-charcoal-400 italic text-sm">
-                      Không tìm thấyngười thuê nào phù hợp.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTenants.map((tenant) => {
-                    const infos = getTenantAssignments(tenant.id);
-                      const isPhoneVisible = visiblePhones.has(tenant.id);
-                    const hue = tenant.full_name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 360;
-                    const avatarStyle = { background: `linear-gradient(135deg, hsl(${hue}, 70%, 65%), hsl(${hue + 20}, 70%, 50%))` };
-
-                    return (
-                      <tr key={tenant.id} className="hover:bg-cream-50/50 transition-colors group">
-                        <td className="px-4 py-2.5 align-top">
-                          <div className="flex items-center gap-3">
-                            <div 
-                              className="w-9 h-9 rounded-full flex items-center justify-center text-white font-serif lining-nums tabular-nums text-base shrink-0 shadow-sm"
-                              style={avatarStyle}
-                            >
-                              {tenant.full_name.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <p className="font-serif lining-nums tabular-nums text-charcoal-900 font-medium text-base">{tenant.full_name}</p>
-                              {infos.some(i => i.assignment.is_primary) && (
-                                <span className="inline-flex items-center gap-1 text-[10px] bg-amber-50 text-amber-600 px-2 py-0.5 rounded-md border border-amber-100 mt-0.5 uppercase font-semibold tracking-wider">
-                                  <PiCrownLight className="w-3 h-3" /> Chủ HĐ
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 align-top">
-                          {infos.length > 0 ? (
-                            <div className="flex flex-col gap-2 pt-1">
-                              {infos.map((info, idx) => (
-                                <div key={idx} className="flex flex-col gap-0.5">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-serif lining-nums tabular-nums font-medium text-wood-700">P.{info.room.room_number}</span>
-                                    {info.assignment.is_primary && (
-                                      <PiCrownLight className="w-3.5 h-3.5 text-amber-500" title="Chủ hợp đồng" />
-                                    )}
-                                  </div>
-                                  <span className="text-[10px] text-charcoal-400">
-                                    Hết hạn: {info.assignment.contract_end_date ? new Date(info.assignment.contract_end_date).toLocaleDateString('vi-VN') : '—'}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-sm text-charcoal-400 italic pt-1 inline-block">Chưa có</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 align-top">
-                          <div className="space-y-1 pt-1">
-                            {tenant.phone && (
-                              <div className="flex items-center gap-2 text-sm text-charcoal-700">
-                                <PiPhoneLight className="w-3.5 h-3.5 text-charcoal-400 shrink-0" />
-                                <span className={`font-mono text-xs ${!isPhoneVisible ? 'tracking-widest' : ''}`}>
-                                  {isPhoneVisible ? tenant.phone : maskValue(tenant.phone, 3)}
-                                </span>
-                                <button onClick={() => toggle(visiblePhones, setVisiblePhones, tenant.id)} className="p-0.5 hover:bg-cream-100 rounded text-charcoal-400">
-                                  {isPhoneVisible ? <PiEyeSlashLight className="w-3.5 h-3.5" /> : <PiEyeLight className="w-3.5 h-3.5" />}
-                                </button>
-                              </div>
-                            )}
-                            {tenant.email && (
-                              <div className="flex items-center gap-2 text-sm text-charcoal-700">
-                                <PiEnvelopeSimpleLight className="w-3.5 h-3.5 text-charcoal-400 shrink-0" />
-                                <span className="text-[11px] truncate max-w-[120px]" title={tenant.email}>{tenant.email}</span>
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 align-top">
-                          {tenant.id_card_number ? (
-                            <div className="flex items-center gap-2 text-sm text-charcoal-700 pt-1">
-                              <PiIdentificationCardLight className="w-3.5 h-3.5 text-charcoal-400 shrink-0" />
-                              <span className="font-mono text-xs">{maskValue(tenant.id_card_number, 3)}</span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-charcoal-400 italic pt-1 inline-block">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 align-top text-right">
-                          <div className="flex justify-end items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pt-1">
-                            <button onClick={() => openAssignModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Gán phòng">
-                              <PiUserPlusLight className="w-4 h-4" />
-                            </button>
-                            {infos.map((info, idx) => (
-                              <button key={idx} onClick={() => handleCheckout(info.assignment)} className="flex items-center gap-1 p-1.5 rounded-lg text-amber-500 hover:text-amber-700 hover:bg-amber-50 transition-colors bg-white border border-transparent hover:border-amber-200" title={`Trả phòng ${info.room.room_number}`}>
-                                <PiSignOutLight className="w-4 h-4" />
-                                <span className="text-[10px] font-medium leading-none font-mono">{info.room.room_number}</span>
-                              </button>
-                            ))}
-                            <button onClick={() => openEditModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Sửa thông tin">
-                              <PiPencilSimpleLight className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => openDeleteModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200" title="Xóa khách thuê">
-                              <PiTrashLight className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        </>
       )}
 
       {/* Create/Edit Modal */}
-
-      {/* Create/Edit Modal */}
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingTenant ? 'Sửa thông tin' : 'Thêm người thuê mới'} size="lg">
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-5">
           <Input label="Họ và tên" name="full_name" value={formData.full_name} onChange={(v) => setFormData({ ...formData, full_name: v })} required placeholder="Nguyễn Văn A" />
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
@@ -735,7 +505,7 @@ export function Tenants() {
                     const newPhone = e.target.value + parsedPhone.body;
                     updatePhone(newPhone);
                   }}
-                  className="w-1/3 px-3.5 py-2.5 rounded-xl border border-charcoal-200 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-900 transition-colors"
+                  className="min-w-[140px] w-auto shrink-0 px-3.5 py-2.5 rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
                 >
                   {countryCodes.map((c) => (
                     <option key={c.code} value={c.code}>
@@ -754,7 +524,7 @@ export function Tenants() {
                   }}
                   placeholder="987654321"
                   required
-                  className="w-2/3 px-3.5 py-2.5 rounded-xl border border-charcoal-200 focus:ring-wood-400 focus:border-wood-400 bg-white text-charcoal-900 transition-colors"
+                  className="w-2/3 px-3.5 py-2.5 rounded-xl border border-charcoal-200 focus:ring-terra-400 focus:border-terra-400 bg-white text-charcoal-900 transition-colors"
                 />
               </div>
               {formErrors.phone && <p className="text-sm text-rose-600 font-medium">{formErrors.phone}</p>}
@@ -782,7 +552,7 @@ export function Tenants() {
           </div>
           <Input label="Địa chỉ thường trú" name="address" value={formData.address} onChange={(v) => setFormData({ ...formData, address: v })} placeholder="123 Đường ABC, Quận XYZ, TP. HCM" />
           <Input label="Liên hệ khẩn cấp" name="emergency_contact" value={formData.emergency_contact} onChange={(v) => setFormData({ ...formData, emergency_contact: v })} placeholder="Nguyễn Văn B - 0909876543" />
-          <Input label="Ghi chú" name="notes" type="textarea" value={formData.notes} onChange={(v) => setFormData({ ...formData, notes: v })} rows={1} />
+          <Input label="Ghi chú" name="notes" type="textarea" value={formData.notes} onChange={(v) => setFormData({ ...formData, notes: v })} rows={2} />
           <div className="flex gap-3 pt-5 border-t border-charcoal-100">
             <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Hủy</Button>
             <Button type="submit" disabled={saving}>{saving ? 'Đang lưu...' : editingTenant ? 'Cập nhật' : 'Thêm mới'}</Button>
@@ -792,13 +562,13 @@ export function Tenants() {
 
       {/* Assign Room Modal */}
       <Modal isOpen={isAssignModalOpen} onClose={() => setIsAssignModalOpen(false)} title={`Gán phòng cho ${assigningTenant?.full_name}`} size="md">
-        <form onSubmit={handleAssign} className="p-5 space-y-4">
+        <form onSubmit={handleAssign} className="p-6 space-y-5">
           <Input label="Chọn phòng" name="room_id" type="select" value={assignData.room_id} onChange={(v) => setAssignData({ ...assignData, room_id: v })} required
             options={[
               { value: '', label: '-- Chọn phòng --' },
               ...assignableRooms.map((r) => ({
                 value: r.id,
-                label: `Phòng ${r.room_number} - ${r.monthly_rent.toLocaleString('vi-VN')}đ${r.active_assignments?.length ? ` (${r.active_assignments.length}người)` : ' (trống)'}`,
+                label: `Phòng ${r.room_number} - ${r.monthly_rent.toLocaleString('vi-VN')}đ${r.active_assignments?.length ? ` (${r.active_assignments.length} người)` : ' (trống)'}`,
               })),
             ]}
           />
@@ -813,14 +583,14 @@ export function Tenants() {
               id="assign_is_primary"
               checked={assignData.is_primary}
               onChange={(e) => setAssignData({ ...assignData, is_primary: e.target.checked })}
-              className="w-4 h-4 text-wood-500 rounded border-charcoal-300 focus:ring-wood-400"
+              className="w-4 h-4 text-terra-500 rounded border-charcoal-300 focus:ring-terra-400"
             />
             <label htmlFor="assign_is_primary" className="flex items-center gap-2 text-sm font-medium text-charcoal-700 cursor-pointer">
-              <PiCrownLight className="w-4 h-4 text-amber-500" />
+              <Crown className="w-4 h-4 text-amber-500" />
               Là chủ hợp đồng
             </label>
           </div>
-          <Input label="Ghi chú" name="notes" type="textarea" value={assignData.notes} onChange={(v) => setAssignData({ ...assignData, notes: v })} rows={1} />
+          <Input label="Ghi chú" name="notes" type="textarea" value={assignData.notes} onChange={(v) => setAssignData({ ...assignData, notes: v })} rows={2} />
           <div className="flex gap-3 pt-5 border-t border-charcoal-100">
             <Button type="button" variant="secondary" onClick={() => setIsAssignModalOpen(false)}>Hủy</Button>
             <Button type="submit" disabled={saving || !assignData.room_id}>{saving ? 'Đang xử lý...' : 'Xác nhận'}</Button>
@@ -838,6 +608,173 @@ export function Tenants() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function MaskedField({
+  value,
+  visible,
+  masked,
+  onToggle,
+  icon,
+  prefix,
+}: {
+  value: string;
+  visible: boolean;
+  masked: string;
+  onToggle: () => void;
+  icon: React.ReactNode;
+  prefix?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shrink-0">
+        {icon}
       </div>
+      <span
+        className={`text-sm text-charcoal-600 flex-1 min-w-0 truncate ${!visible ? 'font-mono tracking-widest' : ''}`}
+        style={{ letterSpacing: visible ? undefined : '0.05em' }}
+      >
+        {prefix}{visible ? value : masked}
+      </span>
+      <button
+        onClick={onToggle}
+        className="p-1 rounded hover:bg-charcoal-100 transition-colors shrink-0"
+        title={visible ? 'Ẩn' : 'Hiện'}
+      >
+        {visible ? <EyeOff className="w-3.5 h-3.5 text-charcoal-400" /> : <Eye className="w-3.5 h-3.5 text-charcoal-400" />}
+      </button>
+    </div>
+  );
+}
+
+function ContactCard({
+  tenant,
+  room,
+  assignment,
+  phoneVisible,
+  emailVisible,
+  idVisible,
+  onTogglePhone,
+  onToggleEmail,
+  onToggleID,
+  maskValue,
+  maskEmail,
+  onEdit,
+  onAssign,
+  onCheckout,
+  onDelete,
+}: {
+  tenant: Tenant;
+  room: Room | null;
+  assignment: RoomAssignment | null;
+  phoneVisible: boolean;
+  emailVisible: boolean;
+  idVisible: boolean;
+  onTogglePhone: () => void;
+  onToggleEmail: () => void;
+  onToggleID: () => void;
+  maskValue: (v: string, n?: number) => string;
+  maskEmail: (v: string) => string;
+  onEdit: () => void;
+  onAssign: () => void;
+  onCheckout: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card hover:shadow-card-hover transition-all duration-300 overflow-hidden">
+      {/* Header */}
+      <div className="px-6 py-5 border-b border-charcoal-100">
+        <div className="flex items-start gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-terra-100 to-terra-200 flex items-center justify-center text-terra-600 font-semibold text-xl shrink-0">
+            {tenant.full_name.charAt(0).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-lg font-semibold text-charcoal-900 truncate">{tenant.full_name}</h3>
+              {assignment?.is_primary && (
+                <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-lg font-medium">
+                  <Crown className="w-3 h-3" />Chủ HĐ
+                </span>
+              )}
+            </div>
+            {room ? (
+              <div className="flex items-center gap-2 mt-2 text-sm text-sage-600">
+                <div className="w-6 h-6 rounded-lg bg-sage-100 flex items-center justify-center">
+                  <Home className="w-3 h-3 text-sage-600" />
+                </div>
+                <span className="font-medium">{room.area} - P. {room.room_number}</span>
+                {assignment && (
+                  <span className="text-charcoal-400 font-normal">
+                    từ {new Date(assignment.start_date).toLocaleDateString('vi-VN')}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mt-2 text-sm text-charcoal-400">
+                <div className="w-6 h-6 rounded-lg bg-charcoal-50 flex items-center justify-center">
+                  <Home className="w-3 h-3 text-charcoal-400" />
+                </div>
+                <span>Chưa có phòng</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Contact Info */}
+      <div className="px-6 py-4 space-y-3 bg-charcoal-50/30">
+        {tenant.phone && (
+          <MaskedField
+            value={tenant.phone}
+            visible={phoneVisible}
+            masked={maskValue(tenant.phone, 3)}
+            onToggle={onTogglePhone}
+            icon={<Phone className="w-4 h-4 text-charcoal-400" />}
+          />
+        )}
+        {tenant.email && (
+          <MaskedField
+            value={tenant.email}
+            visible={emailVisible}
+            masked={maskEmail(tenant.email)}
+            onToggle={onToggleEmail}
+            icon={<Mail className="w-4 h-4 text-charcoal-400" />}
+          />
+        )}
+        {tenant.id_card_number && (
+          <MaskedField
+            value={tenant.id_card_number}
+            visible={idVisible}
+            masked={maskValue(tenant.id_card_number, 3)}
+            onToggle={onToggleID}
+            icon={<Users className="w-4 h-4 text-charcoal-400" />}
+            prefix="CCCD: "
+          />
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="px-6 py-4 border-t border-charcoal-100 flex items-center justify-between">
+        {!room ? (
+          <button onClick={onAssign} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-terra-600 bg-terra-50 hover:bg-terra-100 rounded-xl transition-colors">
+            <UserPlus className="w-4 h-4" />Gán phòng
+          </button>
+        ) : (
+          <button onClick={onCheckout} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-xl transition-colors">
+            <LogOut className="w-4 h-4" />Trả phòng
+          </button>
+        )}
+        <div className="flex items-center gap-1">
+          <button onClick={onEdit} className="p-2.5 rounded-xl text-charcoal-400 hover:text-charcoal-600 hover:bg-charcoal-50 transition-colors">
+            <Edit2 className="w-4 h-4" />
+          </button>
+          <button onClick={onDelete} className="p-2.5 rounded-xl text-charcoal-400 hover:text-rose-500 hover:bg-rose-50 transition-colors">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -1,16 +1,55 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
-import { query, queryOne, run } from './db.js';
+import dotenv from 'dotenv';
+import path from 'path';
+import http from 'http';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
+import { Server as SocketIOServer } from 'socket.io';
+import { fileURLToPath } from 'url';
+import { query, queryOne, run, dbReady } from './db.js';
+import { setupContracts } from './contracts.js';
+import aiRoutes from './src/routes/ai.routes.js';
+import { setupIntegratedRoutes } from './integrated-routes.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const app = express();
-const port = process.env.PORT || 5000;
+const httpServer = http.createServer(app);
+const io = new SocketIOServer(httpServer, { cors: { origin: true, credentials: true } });
+const port = Number(process.env.PORT || 5000);
+const JWT_SECRET = process.env.JWT_SECRET || 'arboris-local-development-secret';
 
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1);
+app.set('io', io);
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 15000, standardHeaders: true, legacyHeaders: false }));
+app.use('/api/ai', aiRoutes);
+
+io.on('connection', (socket) => {
+  socket.on('join', ({ userId, role } = {}) => {
+    if (userId) socket.join(`user:${userId}`);
+    if (role) socket.join(`role:${String(role).toUpperCase()}`);
+  });
+});
 
 // Helper function to generate UUID
 const generateId = () => crypto.randomUUID();
+const PAYMENT_PREFIX = String(process.env.PAYMENT_PREFIX || 'HM').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'HM';
+
+setupIntegratedRoutes(app, {
+  query,
+  queryOne,
+  run,
+  io,
+  jwtSecret: JWT_SECRET,
+  googleClientId: process.env.GOOGLE_CLIENT_ID,
+});
 
 // ----------------- SCHEMA MAPPERS (Vietnamese DB -> English API) -----------------
 const mapRoom = (r) => {
@@ -24,6 +63,7 @@ const mapRoom = (r) => {
     status: r.trang_thai,
     description: r.mo_ta,
     max_occupants: r.so_nguoi_toi_da,
+    location: r.khu_vuc || '',
     created_at: r.ngay_tao,
     updated_at: r.ngay_cap_nhat
   };
@@ -44,6 +84,7 @@ const mapTenant = (t) => {
     username: t.username,
     password: t.password,
     google_email: t.google_email,
+    is_locked: !!t.is_locked,
     created_at: t.ngay_tao,
     updated_at: t.ngay_cap_nhat
   };
@@ -88,6 +129,7 @@ const mapInvoice = (i) => {
   if (!i) return null;
   return {
     id: i.id,
+    ma_hoa_don: i.ma_hoa_don,
     room_id: i.phong_id,
     tenant_id: i.khach_thue_id,
     meter_reading_id: i.chi_so_dien_nuoc_id,
@@ -244,23 +286,26 @@ app.get('/api/rooms/:id', async (req, res) => {
 app.post('/api/rooms', async (req, res) => {
   try {
     const id = generateId();
-    const { room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2 } = req.body;
+    const { room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2, location = 'Cơ sở chính' } = req.body;
     
     await run(`
-      INSERT INTO phong (id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants]);
+      INSERT INTO phong (id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da, khu_vuc)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, room_number, floor, area_sqm, monthly_rent, status, description, max_occupants, location]);
 
     const room = await queryOne('SELECT * FROM phong WHERE id = ?', [id]);
     res.status(201).json(mapRoom(room));
   } catch (error) {
+    if (error.message && error.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ error: 'Mã phòng này đã tồn tại trong hệ thống. Vui lòng chọn mã khác!' });
+    }
     res.status(500).json({ error: error.message });
   }
 });
 
 app.put('/api/rooms/:id', async (req, res) => {
   try {
-    const { room_number, floor, area_sqm, monthly_rent, status, description, max_occupants } = req.body;
+    const { room_number, floor, area_sqm, monthly_rent, status, description, max_occupants, location } = req.body;
     
     const existing = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
     if (!existing) {
@@ -275,17 +320,21 @@ app.put('/api/rooms/:id', async (req, res) => {
       trang_thai: status !== undefined ? status : existing.trang_thai,
       mo_ta: description !== undefined ? description : existing.mo_ta,
       so_nguoi_toi_da: max_occupants !== undefined ? max_occupants : existing.so_nguoi_toi_da,
+      khu_vuc: location !== undefined ? location : existing.khu_vuc,
     };
 
     await run(`
       UPDATE phong 
-      SET so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      SET so_phong = ?, tang = ?, dien_tich = ?, gia_phong = ?, trang_thai = ?, mo_ta = ?, so_nguoi_toi_da = ?, khu_vuc = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [updated.so_phong, updated.tang, updated.dien_tich, updated.gia_phong, updated.trang_thai, updated.mo_ta, updated.so_nguoi_toi_da, req.params.id]);
+    `, [updated.so_phong, updated.tang, updated.dien_tich, updated.gia_phong, updated.trang_thai, updated.mo_ta, updated.so_nguoi_toi_da, updated.khu_vuc, req.params.id]);
 
     const room = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
     res.json(mapRoom(room));
   } catch (error) {
+    if (error.message && error.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ error: 'Mã phòng này đã tồn tại trong hệ thống. Vui lòng chọn mã khác!' });
+    }
     res.status(500).json({ error: error.message });
   }
 });
@@ -361,13 +410,14 @@ app.put('/api/tenants/:id', async (req, res) => {
       username: username !== undefined ? username : existing.username,
       password: password !== undefined ? password : existing.password,
       google_email: google_email !== undefined ? google_email : existing.google_email,
+      is_locked: req.body.is_locked !== undefined ? (req.body.is_locked ? 1 : 0) : existing.is_locked,
     };
 
     await run(`
       UPDATE khach_thue 
-      SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, lien_he_khan_cap = ?, ghi_chu = ?, username = ?, password = ?, google_email = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, lien_he_khan_cap = ?, ghi_chu = ?, username = ?, password = ?, google_email = ?, is_locked = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, updated.lien_he_khan_cap, updated.ghi_chu, updated.username, updated.password, updated.google_email, req.params.id]);
+    `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, updated.lien_he_khan_cap, updated.ghi_chu, updated.username, updated.password, updated.google_email, updated.is_locked, req.params.id]);
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
     res.json(mapTenant(tenant));
@@ -378,6 +428,14 @@ app.put('/api/tenants/:id', async (req, res) => {
 
 app.delete('/api/tenants/:id', async (req, res) => {
   try {
+    const activeAssign = await queryOne('SELECT id FROM hop_dong_thue WHERE khach_thue_id = ? AND dang_hoat_dong = 1', [req.params.id]);
+    if (activeAssign) {
+      return res.status(400).json({ error: 'Không thể xóa khách thuê đang có hợp đồng thuê phòng. Vui lòng thanh lý hợp đồng trước.' });
+    }
+    const unpaidInvoice = await queryOne(`SELECT id FROM hoa_don WHERE khach_thue_id = ? AND trang_thai IN ('pending', 'overdue')`, [req.params.id]);
+    if (unpaidInvoice) {
+      return res.status(400).json({ error: 'Không thể xóa khách thuê đang còn nợ hóa đơn chưa thanh toán.' });
+    }
     await run('DELETE FROM khach_thue WHERE id = ?', [req.params.id]);
     res.status(204).end();
   } catch (error) {
@@ -399,7 +457,7 @@ app.post('/api/room_assignments', async (req, res) => {
     }
 
     // Check current occupancy count
-    const currentAssignments = await query('SELECT id FROM hop_dong_thue WHERE phong_id = ? AND dang_hoat_dong = 1', [room_id]);
+    const currentAssignments = await query('SELECT id, khach_thue_id FROM hop_dong_thue WHERE phong_id = ? AND dang_hoat_dong = 1', [room_id]);
     const maxOccupants = room.so_nguoi_toi_da || 2;
     if (currentAssignments.length >= maxOccupants) {
       return res.status(400).json({ error: `Phòng đã đầy (tối đa ${maxOccupants} người).` });
@@ -414,8 +472,14 @@ app.post('/api/room_assignments', async (req, res) => {
       return res.status(400).json({ error: 'Người thuê này đã ở phòng này rồi.' });
     }
 
+    // Force primary if it's the first tenant
+    let finalIsPrimary = is_primary;
+    if (currentAssignments.length === 0) {
+      finalIsPrimary = true;
+    }
+
     // If marking as primary, unset any existing primary in the same room
-    if (is_primary) {
+    if (finalIsPrimary) {
       await run('UPDATE hop_dong_thue SET la_nguoi_dai_dien = 0 WHERE phong_id = ? AND dang_hoat_dong = 1', [room_id]);
     }
 
@@ -423,10 +487,35 @@ app.post('/api/room_assignments', async (req, res) => {
     await run(`
       INSERT INTO hop_dong_thue (id, phong_id, khach_thue_id, ngay_bat_dau, tien_dat_coc, dang_hoat_dong, la_nguoi_dai_dien, ghi_chu, ngay_het_han_hop_dong)
       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
-    `, [id, room_id, tenant_id, start_date, deposit_amount, is_primary ? 1 : 0, notes || null, contract_end_date || null]);
+    `, [id, room_id, tenant_id, start_date, deposit_amount, finalIsPrimary ? 1 : 0, notes || null, contract_end_date || null]);
 
     // Update room status to occupied
     await run("UPDATE phong SET trang_thai = 'occupied' WHERE id = ?", [room_id]);
+
+    // --- NOTIFICATION TRIGGER ---
+    const newTenant = await queryOne('SELECT ho_ten FROM khach_thue WHERE id = ?', [tenant_id]);
+    const roomInfo = await queryOne('SELECT so_phong FROM phong WHERE id = ?', [room_id]);
+    for (const assign of currentAssignments) {
+      await run(`
+        INSERT INTO notifications (sender_id, title, content, target_type, target_tenant_id, notification_type, action_url)
+        VALUES ('system', ?, ?, 'tenant', ?, 'general', '/dashboard')
+      `, [
+        'Thành viên mới',
+        `Phòng ${roomInfo?.so_phong} vừa có thêm thành viên mới: ${newTenant?.ho_ten || 'Khách thuê mới'}.`,
+        assign.khach_thue_id
+      ]);
+    }
+
+    // Notify the new tenant too
+    await run(`
+      INSERT INTO notifications (sender_id, title, content, target_type, target_tenant_id, notification_type, action_url)
+      VALUES ('system', ?, ?, 'tenant', ?, 'general', '/dashboard')
+    `, [
+      'Chào mừng đến với hệ thống',
+      `Bạn đã được thêm vào phòng ${roomInfo?.so_phong}. Chúc bạn có những trải nghiệm tuyệt vời.`,
+      tenant_id
+    ]);
+    // ----------------------------
 
     const createdAssignment = await queryOne('SELECT * FROM hop_dong_thue WHERE id = ?', [id]);
     res.status(201).json(mapAssignment(createdAssignment));
@@ -453,16 +542,19 @@ app.put('/api/room_assignments/:id/primary', async (req, res) => {
 
 app.post('/api/room_assignments/:id/end', async (req, res) => {
   try {
-    const assignment = await queryOne('SELECT phong_id FROM hop_dong_thue WHERE id = ?', [req.params.id]);
+    const assignment = await queryOne('SELECT phong_id, la_nguoi_dai_dien FROM hop_dong_thue WHERE id = ?', [req.params.id]);
     if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
 
     const todayStr = new Date().toISOString().split('T')[0];
     await run('UPDATE hop_dong_thue SET dang_hoat_dong = 0, ngay_ket_thuc = ? WHERE id = ?', [todayStr, req.params.id]);
 
     // Check if there are any remaining active assignments in the room
-    const remaining = await query('SELECT id FROM hop_dong_thue WHERE phong_id = ? AND dang_hoat_dong = 1', [assignment.phong_id]);
+    const remaining = await query('SELECT id FROM hop_dong_thue WHERE phong_id = ? AND dang_hoat_dong = 1 ORDER BY ngay_bat_dau ASC', [assignment.phong_id]);
     if (remaining.length === 0) {
       await run("UPDATE phong SET trang_thai = 'available' WHERE id = ?", [assignment.phong_id]);
+    } else if (assignment.la_nguoi_dai_dien === 1) {
+      // If the primary tenant checked out, promote the oldest remaining tenant
+      await run('UPDATE hop_dong_thue SET la_nguoi_dai_dien = 1 WHERE id = ?', [remaining[0].id]);
     }
 
     res.json({ message: 'Room assignment ended successfully' });
@@ -599,6 +691,15 @@ app.post('/api/meter_readings', async (req, res) => {
       return res.status(400).json({ error: 'Các trường chỉ số điện nước không được để trống.' });
     }
 
+    if (Number(electricity_old) < 0 || Number(electricity_new) < 0 || Number(water_old) < 0 || Number(water_new) < 0) {
+      return res.status(400).json({ error: 'Các chỉ số điện nước không được là số âm.' });
+    }
+    
+    const monthPrefix = reading_date.substring(0, 7);
+    const existingReading = await queryOne(`SELECT id FROM chi_so_dien_nuoc WHERE phong_id = ? AND ngay_ghi_so LIKE ?`, [room_id, `${monthPrefix}%`]);
+    if (existingReading) {
+      return res.status(400).json({ error: `Phòng này đã được chốt chỉ số điện nước trong tháng ${monthPrefix.split('-').reverse().join('/')}.` });
+    }
     if (Number(electricity_new) < Number(electricity_old)) {
       return res.status(400).json({ error: 'Chỉ số điện mới không được nhỏ hơn chỉ số cũ.' });
     }
@@ -676,6 +777,7 @@ app.delete('/api/meter_readings/:id', async (req, res) => {
 // ----------------- INVOICES API -----------------
 app.get('/api/invoices', async (req, res) => {
   try {
+    const tenantId = req.query.tenant_id ? String(req.query.tenant_id) : null;
     const data = await query(`
       SELECT i.*, 
              r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
@@ -685,8 +787,9 @@ app.get('/api/invoices', async (req, res) => {
       JOIN phong r ON i.phong_id = r.id
       LEFT JOIN khach_thue t ON i.khach_thue_id = t.id
       LEFT JOIN chi_so_dien_nuoc mr ON i.chi_so_dien_nuoc_id = mr.id
+      ${tenantId ? 'WHERE i.khach_thue_id = ? OR i.phong_id IN (SELECT phong_id FROM hop_dong_thue WHERE khach_thue_id = ? AND dang_hoat_dong = 1)' : ''}
       ORDER BY i.ngay_tao DESC
-    `);
+    `, tenantId ? [tenantId, tenantId] : []);
 
     const mapped = data.map(item => ({
       ...mapInvoice(item),
@@ -771,6 +874,14 @@ app.get('/api/invoices/:id', async (req, res) => {
 
     if (!item) return res.status(404).json({ error: 'Invoice not found' });
 
+    // Repair invoices created by older versions that did not assign a payment code.
+    // Persisting it is required so the SePay webhook can match the transfer later.
+    if (!String(item.ma_hoa_don || '').trim()) {
+      const compactId = String(item.id || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      item.ma_hoa_don = `${PAYMENT_PREFIX}${compactId.slice(-10).padStart(10, '0')}`;
+      await run('UPDATE hoa_don SET ma_hoa_don = ?, ngay_cap_nhat = CURRENT_TIMESTAMP WHERE id = ?', [item.ma_hoa_don, item.id]);
+    }
+
     res.json({
       ...mapInvoice(item),
       room: {
@@ -814,6 +925,7 @@ app.get('/api/invoices/:id', async (req, res) => {
 app.post('/api/invoices', async (req, res) => {
   try {
     const id = generateId();
+    const invoiceCode = `${PAYMENT_PREFIX}${Date.now().toString().slice(-10)}`;
     const {
       room_id,
       tenant_id = null,
@@ -831,9 +943,9 @@ app.post('/api/invoices', async (req, res) => {
     } = req.body;
 
     await run(`
-      INSERT INTO hoa_don (id, phong_id, khach_thue_id, chi_so_dien_nuoc_id, thang_hoa_don, nam_hoa_don, tien_phong, tien_dien, tien_nuoc, chi_phi_khac, tong_tien, trang_thai, han_thanh_toan, ghi_chu)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, room_id, tenant_id, meter_reading_id, invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, total_amount, status, due_date, notes]);
+      INSERT INTO hoa_don (id, ma_hoa_don, phong_id, khach_thue_id, chi_so_dien_nuoc_id, thang_hoa_don, nam_hoa_don, tien_phong, tien_dien, tien_nuoc, chi_phi_khac, tong_tien, trang_thai, han_thanh_toan, ghi_chu)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, invoiceCode, room_id, tenant_id, meter_reading_id, invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, total_amount, status, due_date, notes]);
 
     const invoice = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [id]);
     res.status(201).json(mapInvoice(invoice));
@@ -923,6 +1035,7 @@ app.put('/api/invoices/:id/paid', async (req, res) => {
 // ----------------- REPAIR REQUESTS API -----------------
 app.get('/api/repair_requests', async (req, res) => {
   try {
+    const tenantId = req.query.tenant_id ? String(req.query.tenant_id) : null;
     const data = await query(`
       SELECT rr.*, 
              r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
@@ -930,8 +1043,9 @@ app.get('/api/repair_requests', async (req, res) => {
       FROM yeu_cau_sua_chua rr
       JOIN phong r ON rr.phong_id = r.id
       LEFT JOIN khach_thue t ON rr.khach_thue_id = t.id
+      ${tenantId ? 'WHERE rr.khach_thue_id = ? OR rr.phong_id IN (SELECT phong_id FROM hop_dong_thue WHERE khach_thue_id = ? AND dang_hoat_dong = 1)' : ''}
       ORDER BY rr.ngay_bao DESC
-    `);
+    `, tenantId ? [tenantId, tenantId] : []);
 
     const mapped = data.map(item => ({
       ...mapRepair(item),
@@ -1025,6 +1139,7 @@ app.post('/api/repair_requests', async (req, res) => {
     `, [id, room_id, tenant_id, title, description, priority, status, assigned_to]);
 
     const created = await queryOne('SELECT * FROM yeu_cau_sua_chua WHERE id = ?', [id]);
+    io.emit('repair_updated', { id, tenant_id, status, action: 'created' });
     res.status(201).json(mapRepair(created));
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1061,6 +1176,12 @@ app.put('/api/repair_requests/:id', async (req, res) => {
     `, [updated.phong_id, updated.khach_thue_id, updated.tieu_de, updated.mo_ta, updated.muc_do_uu_tien, updated.trang_thai, updated.nguoi_xu_ly, updated.ghi_chu_giai_quyet, updated.ngay_xu_ly_xong, req.params.id]);
 
     const result = await queryOne('SELECT * FROM yeu_cau_sua_chua WHERE id = ?', [req.params.id]);
+    io.emit('repair_updated', {
+      id: req.params.id,
+      tenant_id: result?.khach_thue_id || null,
+      status: result?.trang_thai || updated.trang_thai,
+      action: 'updated',
+    });
     res.json(mapRepair(result));
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1069,7 +1190,9 @@ app.put('/api/repair_requests/:id', async (req, res) => {
 
 app.delete('/api/repair_requests/:id', async (req, res) => {
   try {
+    const existing = await queryOne('SELECT khach_thue_id FROM yeu_cau_sua_chua WHERE id = ?', [req.params.id]);
     await run('DELETE FROM yeu_cau_sua_chua WHERE id = ?', [req.params.id]);
+    io.emit('repair_updated', { id: req.params.id, tenant_id: existing?.khach_thue_id || null, action: 'deleted' });
     res.status(204).end();
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1077,11 +1200,21 @@ app.delete('/api/repair_requests/:id', async (req, res) => {
 });
 
 
-// Start server
+// Tenant contract and portal routes.
+setupContracts(app, query, queryOne, run);
+
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
-  });
+  dbReady
+    .then(() => {
+      httpServer.listen(port, () => {
+        console.log(`ARBORIS integrated server: http://localhost:${port}`);
+      });
+    })
+    .catch((error) => {
+      console.error('Database initialization failed:', error);
+      process.exitCode = 1;
+    });
 }
 
+export { app, httpServer };
 export default app;

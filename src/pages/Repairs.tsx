@@ -1,81 +1,139 @@
-import { useEffect, useState } from 'react';
-import { PiPlusLight, PiWrenchLight, PiPencilSimpleLight, PiTrashLight, PiClockLight, PiCheckCircleLight, PiWarningLight, PiUserLight, PiCalendarBlankLight, PiChatCircleLight, PiXLight } from 'react-icons/pi';
-import { Modal } from '../components/ui/Modal';
-import { Button } from '../components/ui/Button';
-import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  getRepairRequests,
-  createRepairRequest,
-  updateRepairRequest,
-  deleteRepairRequest,
-  getRooms,
-  getTenants,
+  PiCalendarBlankLight,
+  PiCheckCircleLight,
+  PiClockLight,
+  PiPencilSimpleLight,
+  PiPlusLight,
+  PiTrashLight,
+  PiWrenchLight,
+  PiEyeLight,
+  PiWarningLight,
+  PiUserLight,
+  PiChatCircleLight
+} from 'react-icons/pi';
+import { useAuth } from '../context/AuthContext';
+import { Button } from '../components/ui/Button';
+import { Input, Badge, EmptyState, Spinner } from '../components/ui/Input';
+import { Modal } from '../components/ui/Modal';
+import {
+  createMyRepairRequest,
+  deleteMyRepairRequest,
+  getMyRepairRequests,
+  updateMyRepairRequest,
 } from '../lib/api';
-import type { RepairRequest, Room, Tenant } from '../types';
+import { useSocket } from '../hooks/useSocket';
+import type { RepairRequest, Room } from '../types';
+
+const API_URL = import.meta.env.VITE_API_URL || '/api';
+type Filter = 'all' | RepairRequest['status'];
+
+const emptyForm = {
+  room_id: '',
+  title: '',
+  description: '',
+  priority: 'medium' as RepairRequest['priority'],
+};
 
 export function Repairs() {
+  const { user } = useAuth();
+  const tenantId = user?.tenant_id || '';
+  const socket = useSocket();
   const [repairs, setRepairs] = useState<RepairRequest[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [editingRepair, setEditingRepair] = useState<RepairRequest | null>(null);
-  const [viewingRepair, setViewingRepair] = useState<RepairRequest | null>(null);
-  const [deletingRepair, setDeletingRepair] = useState<RepairRequest | null>(null);
-  const [filter, setFilter] = useState<'all' | 'new' | 'in_progress' | 'resolved' | 'closed'>('all');
-
-  const [formData, setFormData] = useState({
-    room_id: '',
-    tenant_id: '',
-    title: '',
-    description: '',
-    priority: 'medium' as 'low' | 'medium' | 'high' | 'urgent',
-    status: 'new' as 'new' | 'in_progress' | 'resolved' | 'closed',
-    assigned_to: '',
-    resolution_notes: '',
-  });
-
   const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState<Filter>('all');
+  
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [editing, setEditing] = useState<RepairRequest | null>(null);
+  const [formData, setFormData] = useState(emptyForm);
 
-  useEffect(() => { loadData(); }, []);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [viewingRepair, setViewingRepair] = useState<RepairRequest | null>(null);
 
-  async function loadData() {
-    try {
-      const [repairsData, roomsData, tenantsData] = await Promise.all([
-        getRepairRequests(), getRooms(), getTenants(),
-      ]);
-      setRepairs(repairsData);
-      setRooms(roomsData);
-      setTenants(tenantsData);
-    } catch (error) {
-      console.error('Failed to load data:', error);
-    } finally {
+  const loadData = useCallback(async (showSpinner = true) => {
+    if (!tenantId) {
+      setRepairs([]);
+      setRooms([]);
       setLoading(false);
+      return;
     }
-  }
+
+    try {
+      if (showSpinner) setLoading(true);
+      const [repairResult, portalResponse] = await Promise.all([
+        getMyRepairRequests(),
+        fetch(`${API_URL}/tenant/portal?tenant_id=${encodeURIComponent(tenantId)}`, {
+          credentials: 'include',
+        }),
+      ]);
+
+      const data = repairResult || [];
+      setRepairs(data);
+      setViewingRepair((current) => {
+        if (!current) return current;
+        return data.find((item: RepairRequest) => item.id === current.id) || current;
+      });
+
+      if (portalResponse.ok) {
+        const portal = await portalResponse.json();
+        const rentalRooms = Array.isArray(portal.rentals)
+          ? portal.rentals.map((item: { room?: Room }) => item.room).filter(Boolean)
+          : portal.room
+            ? [portal.room]
+            : [];
+        setRooms(rentalRooms as Room[]);
+      }
+    } catch (error) {
+      console.error('Không thể tải yêu cầu sửa chữa:', error);
+      setRepairs([]);
+    } finally {
+      if (showSpinner) setLoading(false);
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    void loadData(true);
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!socket || !tenantId) return;
+    const refresh = () => void loadData(false);
+    socket.on('repair_updated', refresh);
+    return () => {
+      socket.off('repair_updated', refresh);
+    };
+  }, [socket, tenantId, loadData]);
+
+  const filteredRepairs = useMemo(
+    () => repairs.filter((repair) => filter === 'all' || repair.status === filter),
+    [repairs, filter],
+  );
+
+  const counts = useMemo(() => ({
+    all: repairs.length,
+    new: repairs.filter((item) => item.status === 'new').length,
+    in_progress: repairs.filter((item) => item.status === 'in_progress').length,
+    resolved: repairs.filter((item) => item.status === 'resolved').length,
+    closed: repairs.filter((item) => item.status === 'closed').length,
+  }), [repairs]);
 
   function openCreateModal() {
-    setEditingRepair(null);
-    setFormData({ room_id: '', tenant_id: '', title: '', description: '', priority: 'medium', status: 'new', assigned_to: '', resolution_notes: '' });
-    setIsModalOpen(true);
+    setEditing(null);
+    setFormData({ ...emptyForm, room_id: rooms.length > 0 ? String(rooms[0].id) : '' });
+    setIsCreateModalOpen(true);
   }
 
-  function openEditModal(repair: RepairRequest, e?: React.MouseEvent) {
-    e?.stopPropagation();
-    setEditingRepair(repair);
+  function openEditModal(repair: RepairRequest) {
+    setEditing(repair);
     setFormData({
-      room_id: repair.room_id,
-      tenant_id: repair.tenant_id || '',
+      room_id: String(repair.room_id),
       title: repair.title,
       description: repair.description || '',
       priority: repair.priority,
-      status: repair.status,
-      assigned_to: repair.assigned_to || '',
-      resolution_notes: repair.resolution_notes || '',
     });
-    setIsModalOpen(true);
+    setIsCreateModalOpen(true);
   }
 
   function openDetailModal(repair: RepairRequest) {
@@ -83,123 +141,110 @@ export function Repairs() {
     setIsDetailModalOpen(true);
   }
 
-  function openDeleteModal(repair: RepairRequest, e?: React.MouseEvent) {
-    e?.stopPropagation();
-    setDeletingRepair(repair);
-    setIsDeleteModalOpen(true);
-  }
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!tenantId || !formData.room_id || !formData.title.trim()) return;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!formData.tenant_id) {
-      alert('Vui lòng chọnngười báo (người thuê đăng ký ở phòng này).');
-      return;
-    }
-    setSaving(true);
     try {
-      const data = {
-        ...formData,
-        tenant_id: formData.tenant_id,
-        resolved_at: (formData.status === 'resolved' || formData.status === 'closed')
-          ? new Date().toISOString() : null,
+      setSaving(true);
+      const payload = {
+        room_id: formData.room_id,
+        tenant_id: tenantId,
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        priority: formData.priority,
       };
-      if (editingRepair) {
-        await updateRepairRequest(editingRepair.id, data);
+
+      if (editing) {
+        await updateMyRepairRequest(editing.id, {
+          title: payload.title,
+          description: payload.description,
+          priority: payload.priority,
+        });
       } else {
-        await createRepairRequest(data);
+        await createMyRepairRequest({
+          room_id: payload.room_id,
+          title: payload.title,
+          description: payload.description,
+          priority: payload.priority,
+        });
       }
-      await loadData();
-      setIsModalOpen(false);
-    } catch (error: any) {
-      console.error('Failed to save repair request:', error);
-      const msg = error?.response?.data?.error || error?.message || 'Không thỒ lưu yêu cầu. Vui lòng thử lại.';
-      alert(msg);
+      setIsCreateModalOpen(false);
+      await loadData(false);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Không thể lưu yêu cầu sửa chữa.');
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleDelete() {
-    if (!deletingRepair) return;
+  async function handleDelete(repair: RepairRequest) {
+    if (!window.confirm(`Xóa yêu cầu “${repair.title}”?`)) return;
     try {
-      await deleteRepairRequest(deletingRepair.id);
-      await loadData();
-      setIsDeleteModalOpen(false);
+      await deleteMyRepairRequest(repair.id);
+      setIsDetailModalOpen(false);
+      await loadData(false);
     } catch (error) {
-      alert('Không thỒ xóa yêu cầu.');
+      alert(error instanceof Error ? error.message : 'Không thể xóa yêu cầu.');
     }
   }
 
-  async function handleStatusChange(repair: RepairRequest, newStatus: 'in_progress' | 'resolved' | 'closed') {
+  async function handleConfirmDone(repair: RepairRequest) {
     try {
-      await updateRepairRequest(repair.id, {
-        status: newStatus,
-        resolved_at: (newStatus === 'resolved' || newStatus === 'closed') ? new Date().toISOString() : null,
-      });
-      await loadData();
-      // Refresh the viewing repair if detail modal is open
-      if (viewingRepair?.id === repair.id) {
-        setIsDetailModalOpen(false);
-      }
+      await updateMyRepairRequest(repair.id, { status: 'closed' });
+      await loadData(false);
     } catch (error) {
-      alert('Không thỒ cập nhật trạng thái.');
+      alert(error instanceof Error ? error.message : 'Không thể xác nhận.');
     }
   }
-
-  const filteredRepairs = repairs.filter((r) => filter === 'all' || r.status === filter);
-
-  const statusCounts = {
-    all: repairs.length,
-    new: repairs.filter((r) => r.status === 'new').length,
-    in_progress: repairs.filter((r) => r.status === 'in_progress').length,
-    resolved: repairs.filter((r) => r.status === 'resolved').length,
-    closed: repairs.filter((r) => r.status === 'closed').length,
-  };
-
-  // Only tenants currently in the selected room can report a repair
-  const tenantsInSelectedRoom = (() => {
-    if (!formData.room_id) return [];
-    const room = rooms.find((r) => r.id === formData.room_id);
-    return (room?.active_assignments ?? [])
-      .map((a) => a.tenant)
-      .filter((t): t is NonNullable<typeof t> => Boolean(t));
-  })();
 
   if (loading) return <Spinner />;
 
+  const filters: Array<{ value: Filter; label: string }> = [
+    { value: 'all', label: 'Tất cả' },
+    { value: 'new', label: 'Mới' },
+    { value: 'in_progress', label: 'Đang xử lý' },
+    { value: 'resolved', label: 'Đã hoàn thành' },
+    { value: 'closed', label: 'Đã đóng' },
+  ];
+
   return (
     <div className="space-y-10">
-      {/* Page Header */}
-      <header className="flex items-start justify-between">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Sửa chữa</h1>
-          <p className="text-charcoal-400 mt-2 text-sm">Quản lý và theo dõi các yêu cầu bảo trì</p>
+          <p className="text-charcoal-400 mt-2 text-sm">Gửi và theo dõi yêu cầu bảo trì phòng trọ</p>
         </div>
-        <Button onClick={openCreateModal}>
-          <PiPlusLight className="w-4 h-4" />
-          Tạo yêu cầu
+        <Button onClick={openCreateModal} disabled={rooms.length === 0}>
+          <PiPlusLight className="w-4 h-4" /> Tạo yêu cầu
         </Button>
       </header>
 
-      {/* Filters */}
+      {rooms.length === 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+          Bạn chưa được xếp phòng nên chưa thể tạo yêu cầu sửa chữa.
+        </div>
+      )}
+
       <section className="space-y-4">
-        <div className="flex gap-2 flex-wrap">
-          {(['all', 'new', 'in_progress', 'resolved', 'closed'] as const).map((status) => (
-            <button key={status} onClick={() => setFilter(status)}
+        <div className="flex flex-wrap gap-2">
+          {filters.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setFilter(item.value)}
               className={`px-5 py-2.5 text-sm font-medium rounded-xl transition-all ${
-                filter === status
+                filter === item.value
                   ? 'bg-white text-charcoal-900 shadow-card border border-charcoal-100'
                   : 'text-charcoal-400 hover:text-charcoal-600 hover:bg-white/50'
               }`}
             >
-              {status === 'all' && 'Tất cả'}
-              {status === 'new' && 'Mới'}
-              {status === 'in_progress' && 'Đang xử lý'}
-              {status === 'resolved' && 'Đã xong xong'}
-              {status === 'closed' && 'Đã đóng'}
+              {item.label}
               <span className={`ml-2 px-2 py-0.5 rounded-lg text-xs ${
-                filter === status ? 'bg-wood-100 text-wood-700' : 'bg-charcoal-100 text-charcoal-500'
-              }`}>{statusCounts[status]}</span>
+                filter === item.value ? 'bg-wood-100 text-wood-700' : 'bg-charcoal-100 text-charcoal-500'
+              }`}>
+                {counts[item.value]}
+              </span>
             </button>
           ))}
         </div>
@@ -208,9 +253,13 @@ export function Repairs() {
       {filteredRepairs.length === 0 ? (
         <EmptyState
           icon={<PiWrenchLight className="w-8 h-8" />}
-          title="Không có yêu cầu nào"
-          description={filter === 'all' ? 'Chưa có yêu cầu sửa chữa nào' : 'Không có yêu cầu nào ở trạng thái này'}
-          action={filter === 'all' ? <Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4" />Tạo yêu cầu</Button> : undefined}
+          title="Chưa có yêu cầu sửa chữa"
+          description={filter === 'all'
+            ? 'Khi phòng có sự cố, hãy tạo yêu cầu để chủ trọ tiếp nhận và xử lý.'
+            : 'Không có yêu cầu nào ở trạng thái này.'}
+          action={rooms.length > 0 && filter === 'all' ? (
+            <Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4" /> Tạo yêu cầu</Button>
+          ) : undefined}
         />
       ) : (
         <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
@@ -222,23 +271,20 @@ export function Repairs() {
                 <th className="px-4 py-3 text-center">Mức độ</th>
                 <th className="px-4 py-3 text-center">Trạng thái</th>
                 <th className="px-4 py-3">Ngày báo</th>
-                <th className="px-4 py-3 text-right">Thao tác</th>
+                <th className="px-4 py-3 text-right">Chi tiết</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-cream-100">
               {filteredRepairs.map((repair) => {
-                const priorityColors: Record<string, { bg: string; text: string; label: string }> = {
-                  low: { bg: 'bg-charcoal-50', text: 'text-charcoal-500', label: 'Thấp' },
-                  medium: { bg: 'bg-blue-50', text: 'text-blue-600', label: 'Trung bình' },
-                  high: { bg: 'bg-amber-50', text: 'text-amber-600', label: 'Cao' },
-                  urgent: { bg: 'bg-rose-50', text: 'text-rose-600', label: 'Khẩn cấp' },
-                };
-                const priority = priorityColors[repair.priority] || priorityColors.medium;
+                const priority = getPriorityConfig(repair.priority);
                 return (
-                  <tr key={repair.id} onClick={() => openDetailModal(repair)} className="hover:bg-cream-50/50 transition-colors group cursor-pointer">
+                  <tr
+                    key={repair.id}
+                    onClick={() => openDetailModal(repair)}
+                    className="hover:bg-cream-50/50 transition-colors group cursor-pointer"
+                  >
                     <td className="px-4 py-3 align-middle">
-                      <p className="font-serif font-medium text-wood-700 text-[15px]">P.{repair.room?.room_number}</p>
-                      <p className="text-xs text-charcoal-400 mt-0.5">{repair.tenant?.full_name || '—'}</p>
+                      <p className="font-serif font-medium text-wood-700 text-[15px]">P.{repair.room?.room_number || repair.room_id}</p>
                     </td>
                     <td className="px-4 py-3 align-middle">
                       <p className="font-serif font-semibold text-charcoal-900 tracking-wide line-clamp-1">{repair.title}</p>
@@ -249,31 +295,21 @@ export function Repairs() {
                         {priority.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3 align-middle text-center">
-                      <StatusBadge status={repair.status} />
-                    </td>
+                    <td className="px-4 py-3 align-middle text-center"><StatusBadge status={repair.status} /></td>
                     <td className="px-4 py-3 align-middle">
                       <span className="font-serif lining-nums tabular-nums font-medium text-charcoal-600">
-                        {new Date(repair.reported_at).toLocaleDateString('vi-VN')}
+                        {formatDate(repair.reported_at || repair.created_at)}
                       </span>
                     </td>
                     <td className="px-4 py-3 align-middle text-right">
-                      <div className="flex justify-end items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                        {repair.status === 'new' && (
-                          <button onClick={() => handleStatusChange(repair, 'in_progress')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-wood-600 bg-wood-50 hover:bg-wood-100 rounded-lg border border-wood-200 transition-colors">
-                            <PiClockLight className="w-3.5 h-3.5" /> Bắt đầu
-                          </button>
-                        )}
-                        {repair.status === 'in_progress' && (
-                          <button onClick={() => handleStatusChange(repair, 'resolved')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
-                            <PiCheckCircleLight className="w-3.5 h-3.5" /> Xong
-                          </button>
-                        )}
-                        <button onClick={(e) => openEditModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Sửa">
-                          <PiPencilSimpleLight className="w-4 h-4" />
-                        </button>
-                        <button onClick={(e) => openDeleteModal(repair, e as any)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200" title="Xóa">
-                          <PiTrashLight className="w-4 h-4" />
+                      <div className="flex justify-end items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => openDetailModal(repair)}
+                          className="p-2 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors"
+                          title="Xem chi tiết"
+                        >
+                          <PiEyeLight className="w-4 h-4" />
                         </button>
                       </div>
                     </td>
@@ -285,188 +321,176 @@ export function Repairs() {
         </div>
       )}
 
-      {/* Create/Edit Modal */}
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingRepair ? 'Sửa yêu cầu' : 'Tạo yêu cầu sửa chữa'} size="lg">
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <Input label="Tiêu đề" name="title" value={formData.title} onChange={(v) => setFormData({ ...formData, title: v })} required placeholder="VD: Bóng đèn bị hỏng" />
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Chọn phòng" name="room_id" type="select" value={formData.room_id}
-              onChange={(v) => {
-                const room = rooms.find((r) => r.id === v);
-                const primaryTenant = room?.active_assignments?.find((a) => a.is_primary)?.tenant;
-                setFormData({ ...formData, room_id: v, tenant_id: primaryTenant?.id || '' });
-              }}
-              required
-              options={[{ value: '', label: '-- Chọn phòng --' }, ...rooms.map((r) => ({ value: r.id, label: `Phòng ${r.room_number}` }))]}
-            />
-            <Input label="Người báo (Bắt buộc)" name="tenant_id" type="select" value={formData.tenant_id}
-              onChange={(v) => setFormData({ ...formData, tenant_id: v })}
-              disabled={!formData.room_id}
-              required
-              options={[
-                {
-                  value: '',
-                  label: !formData.room_id
-                    ? '-- Chọn phòng trước --'
-                    : tenantsInSelectedRoom.length === 0
-                    ? '-- Không có người ở phòng này --'
-                    : '-- Chọnngười báo --',
-                },
-                ...tenantsInSelectedRoom.map((t) => ({ value: t.id, label: t.full_name })),
-              ]}
-            />
-          </div>
-          <Input label="Mô tả chi tiết" name="description" type="textarea" value={formData.description} onChange={(v) => setFormData({ ...formData, description: v })} placeholder="Mô tả chi tiết sự cố..." rows={3} />
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Mức độ ưu tiên" name="priority" type="select" value={formData.priority}
-              onChange={(v) => setFormData({ ...formData, priority: v as 'low' | 'medium' | 'high' | 'urgent' })}
-              options={[{ value: 'low', label: 'Thấp' }, { value: 'medium', label: 'Trung bình' }, { value: 'high', label: 'Cao' }, { value: 'urgent', label: 'Khẩn cấp' }]}
-            />
-            <Input label="Trạng thái" name="status" type="select" value={formData.status}
-              onChange={(v) => setFormData({ ...formData, status: v as 'new' | 'in_progress' | 'resolved' | 'closed' })}
-              options={[{ value: 'new', label: 'Mới tạo' }, { value: 'in_progress', label: 'Đang xử lý' }, { value: 'resolved', label: 'Đã xong xong' }, { value: 'closed', label: 'Đã đóng' }]}
-            />
-          </div>
-          <Input label="Người phụ trách" name="assigned_to" value={formData.assigned_to} onChange={(v) => setFormData({ ...formData, assigned_to: v })} placeholder="VD: Nguyễn Văn A" />
-          {(formData.status === 'resolved' || formData.status === 'closed') && (
-            <Input label="Ghi chú xử lý" name="resolution_notes" type="textarea" value={formData.resolution_notes} onChange={(v) => setFormData({ ...formData, resolution_notes: v })} placeholder="Mô tả cách xử lý..." rows={2} />
-          )}
-          <div className="flex gap-3 pt-4 border-t border-slate-200">
-            <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>Hủy</Button>
-            <Button type="submit" disabled={saving}>{saving ? 'Đang lưu...' : editingRepair ? 'Cập nhật' : 'Tạo yêu cầu'}</Button>
+      {/* Tạo/Cập nhật Modal */}
+      <Modal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title={editing ? 'Cập nhật yêu cầu sửa chữa' : 'Tạo yêu cầu sửa chữa'}
+        size="md"
+      >
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 bg-white">
+          <Input
+            label="Phòng"
+            name="room_id"
+            type="select"
+            value={formData.room_id}
+            onChange={(value) => setFormData((current) => ({ ...current, room_id: value }))}
+            options={rooms.map((room) => ({ value: String(room.id), label: `Phòng ${room.room_number}` }))}
+            required
+            disabled={Boolean(editing)}
+          />
+          <Input
+            label="Tiêu đề sự cố"
+            name="title"
+            value={formData.title}
+            onChange={(value) => setFormData((current) => ({ ...current, title: value }))}
+            placeholder="Ví dụ: Máy lạnh không hoạt động"
+            required
+          />
+          <Input
+            label="Mô tả chi tiết"
+            name="description"
+            type="textarea"
+            value={formData.description}
+            onChange={(value) => setFormData((current) => ({ ...current, description: value }))}
+            placeholder="Mô tả tình trạng, vị trí và thời điểm phát hiện..."
+            rows={5}
+          />
+          <Input
+            label="Mức độ ưu tiên"
+            name="priority"
+            type="select"
+            value={formData.priority}
+            onChange={(value) => setFormData((current) => ({ ...current, priority: value as RepairRequest['priority'] }))}
+            options={[
+              { value: 'low', label: 'Thấp' },
+              { value: 'medium', label: 'Trung bình' },
+              { value: 'high', label: 'Cao' },
+              { value: 'urgent', label: 'Khẩn cấp' },
+            ]}
+          />
+          <div className="flex justify-end gap-3 border-t border-charcoal-100 pt-5">
+            <Button type="button" variant="secondary" onClick={() => setIsCreateModalOpen(false)}>Hủy</Button>
+            <Button type="submit" disabled={saving}>{saving ? 'Đang lưu...' : 'Lưu yêu cầu'}</Button>
           </div>
         </form>
       </Modal>
 
       {/* Detail Modal */}
-      <Modal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} title="Chi tiết yêu cầu" size="lg">
+      <Modal
+        isOpen={isDetailModalOpen}
+        onClose={() => setIsDetailModalOpen(false)}
+        title="Chi tiết yêu cầu"
+        size="lg"
+      >
         {viewingRepair && (
-          <div className="p-6 space-y-5">
+          <div className="p-6 space-y-5 bg-white">
             <div className="flex items-center gap-3 flex-wrap">
               <PriorityIcon priority={viewingRepair.priority} />
               <h3 className="text-2xl font-serif font-bold text-charcoal-900 flex-1 tracking-wide">{viewingRepair.title}</h3>
               <StatusBadge status={viewingRepair.status} />
             </div>
 
-            {viewingRepair.description && (
-              <div className="p-4 bg-cream-50 rounded-xl">
-                <p className="text-charcoal-700">{viewingRepair.description}</p>
-              </div>
-            )}
+            <div className="p-4 bg-cream-50 rounded-xl">
+              <p className="text-charcoal-700 whitespace-pre-line">{viewingRepair.description || 'Không có mô tả chi tiết.'}</p>
+            </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center">
-                  <PiWrenchLight className="w-4 h-4 text-charcoal-500" />
-                </div>
-                <div>
-                  <p className="text-xs text-charcoal-400">Phòng</p>
-                  <p className="font-medium text-charcoal-900">{viewingRepair.room?.room_number}</p>
-                </div>
-              </div>
-              {viewingRepair.tenant && (
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center">
-                    <PiUserLight className="w-4 h-4 text-charcoal-500" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-charcoal-400">Người báo</p>
-                    <p className="font-medium text-charcoal-900">{viewingRepair.tenant.full_name}</p>
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center">
-                  <PiCalendarBlankLight className="w-4 h-4 text-charcoal-500" />
-                </div>
-                <div>
-                  <p className="text-xs text-charcoal-400">Ngày báo</p>
-                  <p className="font-medium text-charcoal-900">{new Date(viewingRepair.reported_at).toLocaleDateString('vi-VN')}</p>
-                </div>
-              </div>
-              {viewingRepair.assigned_to && (
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center">
-                    <PiUserLight className="w-4 h-4 text-charcoal-500" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-charcoal-400">Người phụ trách</p>
-                    <p className="font-medium text-charcoal-900">{viewingRepair.assigned_to}</p>
-                  </div>
-                </div>
-              )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <InfoItem icon={<PiWrenchLight />} label="Phòng" value={String(viewingRepair.room?.room_number || viewingRepair.room_id)} />
+              <InfoItem icon={<PiUserLight />} label="Người báo" value={viewingRepair.tenant?.full_name || 'Người thuê'} />
+              <InfoItem icon={<PiCalendarBlankLight />} label="Ngày báo" value={formatDate(viewingRepair.reported_at || viewingRepair.created_at)} />
+              <InfoItem icon={<PiUserLight />} label="Người phụ trách" value={viewingRepair.assigned_to || 'Chưa phân công'} />
             </div>
 
             {viewingRepair.resolution_notes && (
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <PiChatCircleLight className="w-4 h-4 text-charcoal-400" />
-                  <p className="text-sm font-medium text-charcoal-600">Ghi chú xử lý</p>
+                  <p className="text-sm font-medium text-charcoal-600">Phản hồi xử lý từ Chủ trọ/Quản lý</p>
                 </div>
                 <div className="p-3 bg-sage-50 rounded-xl border border-sage-200">
-                  <p className="text-sage-800">{viewingRepair.resolution_notes}</p>
+                  <p className="text-sage-800 whitespace-pre-line">{viewingRepair.resolution_notes}</p>
                 </div>
               </div>
             )}
 
             <div className="flex gap-2 pt-5 border-t border-charcoal-100 flex-wrap">
-              {viewingRepair.status === 'new' && (
-                <Button onClick={() => handleStatusChange(viewingRepair, 'in_progress')}>
-                  <PiClockLight className="w-4 h-4" />Bắt đầu xử lý
-                </Button>
-              )}
-              {viewingRepair.status === 'in_progress' && (
-                <Button variant="success" onClick={() => handleStatusChange(viewingRepair, 'resolved')}>
-                  <PiCheckCircleLight className="w-4 h-4" />Đã hoàn thành
-                </Button>
-              )}
               {viewingRepair.status === 'resolved' && (
-                <Button variant="secondary" onClick={() => handleStatusChange(viewingRepair, 'closed')}>
-                  <PiXLight className="w-4 h-4" />Đãng yêu cầu
+                <Button variant="success" onClick={() => void handleConfirmDone(viewingRepair)}>
+                  <PiCheckCircleLight className="w-4 h-4" /> Xác nhận đã xong
                 </Button>
               )}
-              <Button variant="ghost" onClick={() => { setIsDetailModalOpen(false); openEditModal(viewingRepair); }}>
-                <PiPencilSimpleLight className="w-4 h-4" />Sửa
-              </Button>
+              
+              {(viewingRepair.status === 'new' || viewingRepair.status === 'in_progress') && (
+                <>
+                  <Button variant="ghost" onClick={() => {
+                    setIsDetailModalOpen(false);
+                    openEditModal(viewingRepair);
+                  }}>
+                    <PiPencilSimpleLight className="w-4 h-4" /> Sửa yêu cầu
+                  </Button>
+                  {viewingRepair.status === 'new' && (
+                    <Button variant="danger" onClick={() => void handleDelete(viewingRepair)}>
+                      <PiTrashLight className="w-4 h-4" /> Xóa
+                    </Button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}
-      </Modal>
-
-      {/* Delete Modal */}
-      <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Xác nhận xóa" size="sm">
-        <div className="p-6">
-          <p className="text-slate-600">Bạn có chắc muốn xóa yêu cầu <strong>{deletingRepair?.title}</strong>?</p>
-          <div className="flex gap-3 mt-6">
-            <Button variant="secondary" onClick={() => setIsDeleteModalOpen(false)}>Hủy</Button>
-            <Button variant="danger" onClick={handleDelete}>Xóa</Button>
-          </div>
-        </div>
       </Modal>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, 'info' | 'warning' | 'success' | 'default'> = {
-    new: 'info', in_progress: 'warning', resolved: 'success', closed: 'default',
+function StatusBadge({ status }: { status: RepairRequest['status'] }) {
+  const config: Record<RepairRequest['status'], { label: string; variant: 'info' | 'warning' | 'success' | 'default' }> = {
+    new: { label: 'Mới', variant: 'info' },
+    in_progress: { label: 'Đang xử lý', variant: 'warning' },
+    resolved: { label: 'Đã hoàn thành', variant: 'success' },
+    closed: { label: 'Đã đóng', variant: 'default' },
   };
-  return <Badge status={status} variant={variants[status]} />;
+  const item = config[status];
+  return <Badge status={`${item.label}`} variant={item.variant} />;
 }
 
-function PriorityIcon({ priority }: { priority: string }) {
-  const config: Record<string, { label: string; bg: string; text: string }> = {
+function PriorityIcon({ priority }: { priority: RepairRequest['priority'] }) {
+  const config = getPriorityConfig(priority);
+  return (
+    <span className={`inline-flex items-center px-3 py-1 rounded-lg text-sm font-medium ${config.bg} ${config.text}`}>
+      <PiWarningLight className="w-4 h-4 mr-1.5" />
+      {config.label}
+    </span>
+  );
+}
+
+function getPriorityConfig(priority: RepairRequest['priority']) {
+  const config: Record<RepairRequest['priority'], { label: string; bg: string; text: string }> = {
     low: { label: 'Thấp', bg: 'bg-charcoal-100', text: 'text-charcoal-500' },
     medium: { label: 'Trung bình', bg: 'bg-blue-100', text: 'text-blue-600' },
     high: { label: 'Cao', bg: 'bg-amber-100', text: 'text-amber-600' },
     urgent: { label: 'Khẩn cấp', bg: 'bg-rose-100', text: 'text-rose-600' },
   };
-  const c = config[priority] || config.medium;
+  return config[priority] || config.medium;
+}
+
+function InfoItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <span className={`inline-flex items-center px-3 py-1 rounded-lg text-sm font-medium ${c.bg} ${c.text}`}>
-      <PiWarningLight className="w-4 h-4 mr-1.5" />
-      {c.label}
-    </span>
+    <div className="flex items-center gap-3">
+      <div className="w-9 h-9 rounded-lg bg-charcoal-100 flex items-center justify-center text-charcoal-500">
+        {icon}
+      </div>
+      <div>
+        <p className="text-xs text-charcoal-400">{label}</p>
+        <p className="font-medium text-charcoal-900">{value}</p>
+      </div>
+    </div>
   );
 }
 
+function formatDate(value?: string | null) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN');
+}

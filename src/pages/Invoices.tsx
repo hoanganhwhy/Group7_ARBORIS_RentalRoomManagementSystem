@@ -8,23 +8,41 @@ import {
   PiClockLight,
   PiWarningCircleLight,
 } from 'react-icons/pi';
+
+import {
+  Plus,
+  FileText,
+  Edit2,
+  Trash2,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  CreditCard,
+} from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { FilterDropdown } from '../components/ui/FilterDropdown';
 import { Button } from '../components/ui/Button';
 import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { useAuth } from '../context/AuthContext';
+import { MockPaymentGateway } from './MockPaymentGateway';
 import {
   getInvoices,
   createInvoice,
   updateInvoice,
   deleteInvoice,
-  markInvoicePaid,
   markOverdueInvoices,
   getRooms,
   getMeterReadings,
+  confirmPayment,
 } from '../lib/api';
 import type { Invoice, Room, MeterReading } from '../types';
+import { Pagination } from '../components/common/Pagination';
+import { PageSizeSelector } from '../components/common/PageSizeSelector';
+import { SearchInput } from '../components/common/SearchInput';
 
 export function Invoices() {
+  const { user } = useAuth();
+  const isTenant = user?.role === 'TENANT';
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [readings, setReadings] = useState<MeterReading[]>([]);
@@ -33,9 +51,24 @@ export function Invoices() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
+  const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
+  const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
+  const [filter, setFilter] = useState<
+    'all' | 'pending' | 'paid' | 'overdue' | 'waiting_confirmation'
+  >('pending');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
-  const [filterYear, setFilterYear] = useState<number>(new Date().getFullYear());
+  const [filterYear, setFilterYear] = useState<number>(0); // 0 = all
+  const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterArea, setFilterArea] = useState<string>('all');
+  const [filterDate, setFilterDate] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState({ totalPages: 1, hasNextPage: false, hasPreviousPage: false });
+
+  // Add state for all invoices to compute summary
+  const [allInvoices, setAllInvoices] = useState<Invoice[]>([]);
 
   const [formData, setFormData] = useState({
     room_id: '',
@@ -45,49 +78,61 @@ export function Invoices() {
     room_rent: '' as string | number,
     electricity_cost: '' as string | number,
     water_cost: '' as string | number,
-    other_fees: '' as string | number,
+    other_fees: '',
     due_date: '',
     notes: '',
   });
 
   const [saving, setSaving] = useState(false);
 
+  // loadData uses the dependencies listed below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    loadData();
+    void loadData();
+  }, [page, limit, filter, filterMonth, filterYear, filterFloor, filterArea, filterDate, searchQuery]);
 
-    const handleOpenModal = (e: any) => {
-      if (e.detail?.action === 'new-invoice') {
-        setEditingInvoice(null);
-        setIsModalOpen(true);
-      }
-    };
-
-    const handleApplyFilter = (e: any) => {
-      if (e.detail?.filterKey === 'statusFilter') {
-        setFilter(e.detail.filterValue);
-      }
-    };
-
-    window.addEventListener('open-modal', handleOpenModal);
-    window.addEventListener('apply-filter', handleApplyFilter);
-    return () => {
-      window.removeEventListener('open-modal', handleOpenModal);
-      window.removeEventListener('apply-filter', handleApplyFilter);
-    };
-  }, []);
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [filter, filterMonth, filterYear, filterFloor, filterArea, filterDate, searchQuery]);
 
   async function loadData() {
     try {
+      setLoading(true);
       // Mark any pending invoices past their due date as overdue before fetching
       await markOverdueInvoices().catch(() => {});
-      const [invoicesData, roomsData, readingsData] = await Promise.all([
-        getInvoices(),
-        getRooms(),
-        getMeterReadings(),
+      const [invoicesData, allInvoicesData] = await Promise.all([
+        getInvoices({
+          page,
+          limit,
+          search: searchQuery,
+          status: filter !== 'all' ? filter : undefined,
+          month: filterMonth > 0 ? filterMonth.toString() : undefined,
+          year: filterYear > 0 ? filterYear.toString() : undefined,
+          floor: filterFloor !== 'all' ? filterFloor : undefined,
+          area: filterArea !== 'all' ? filterArea : undefined,
+          date: filterDate || undefined,
+          tenant_id: isTenant ? (user?.tenant_id || user?.id) : undefined,
+        } as any).catch(() => ({ data: [], pagination: { page: 1, limit, totalItems: 0, totalPages: 1, hasNextPage: false, hasPreviousPage: false } })),
+        getInvoices({ limit: 10000, tenant_id: isTenant ? (user?.tenant_id || user?.id) : undefined } as any).catch(() => ({ data: [] }))
       ]);
-      setInvoices(invoicesData);
-      setRooms(roomsData);
-      setReadings(readingsData);
+
+      let roomsRes: any = { data: [] };
+      let readingsRes: any = { data: [] };
+      if (!isTenant) {
+        try {
+          roomsRes = await getRooms({ limit: 100 });
+          readingsRes = await getMeterReadings({ limit: 1000 });
+        } catch (error) {
+          console.error('Failed to load room or meter data:', error);
+        }
+      }
+
+      setInvoices(invoicesData.data || []);
+      if (invoicesData.pagination) setPagination(invoicesData.pagination);
+      setAllInvoices(allInvoicesData.data || []);
+      setRooms(roomsRes.data || []);
+      setReadings(readingsRes.data || []);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -115,15 +160,15 @@ export function Invoices() {
   function openEditModal(invoice: Invoice) {
     setEditingInvoice(invoice);
     setFormData({
-      room_id: invoice.room_id,
-      meter_reading_id: invoice.meter_reading_id || '',
+      room_id: String(invoice.room_id),
+      meter_reading_id: invoice.meter_reading_id ? String(invoice.meter_reading_id) : '',
       invoice_month: invoice.invoice_month,
       invoice_year: invoice.invoice_year,
-      room_rent: invoice.room_rent,
-      electricity_cost: invoice.electricity_cost,
-      water_cost: invoice.water_cost,
-      other_fees: invoice.other_fees ?? '',
-      due_date: invoice.due_date,
+      room_rent: invoice.room_rent ?? '',
+      electricity_cost: invoice.electricity_cost ?? '',
+      water_cost: invoice.water_cost ?? '',
+      other_fees: invoice.other_fees != null ? String(invoice.other_fees) : '',
+      due_date: invoice.due_date || '',
       notes: invoice.notes || '',
     });
     setIsModalOpen(true);
@@ -135,7 +180,7 @@ export function Invoices() {
   }
 
   function handleRoomChange(roomId: string) {
-    const room = rooms.find((r) => r.id === roomId);
+    const room = rooms.find((r) => r.id.toString() === roomId.toString());
     if (room) {
       const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         .toISOString()
@@ -146,23 +191,25 @@ export function Invoices() {
         room_rent: room.monthly_rent,
         due_date: dueDate,
       });
+    } else {
+      setFormData({ ...formData, room_id: roomId });
     }
   }
 
   function handleReadingChange(readingId: string) {
-    const reading = readings.find((r) => r.id === readingId);
+    const reading = readings.find((r) => r.id.toString() === readingId.toString());
     if (reading) {
-      const elecUsage = reading.electricity_new - reading.electricity_old;
-      const waterUsage = reading.water_new - reading.water_old;
-      const electricityCost = elecUsage * reading.electricity_price_per_unit;
-      const waterCost = waterUsage * reading.water_price_per_unit;
-
+      const elecCost = (reading.electricity_new - reading.electricity_old) * reading.electricity_price_per_unit;
+      const waterCost = (reading.water_new - reading.water_old) * reading.water_price_per_unit;
+      
       setFormData({
         ...formData,
         meter_reading_id: readingId,
-        electricity_cost: electricityCost,
+        electricity_cost: elecCost,
         water_cost: waterCost,
       });
+    } else {
+      setFormData({ ...formData, meter_reading_id: readingId });
     }
   }
 
@@ -170,7 +217,7 @@ export function Invoices() {
     e.preventDefault();
     setSaving(true);
     try {
-      const room = rooms.find((r) => r.id === formData.room_id);
+      const room = rooms.find((r) => r.id.toString() === formData.room_id.toString());
       const rentVal = parseFloat(formData.room_rent as any) || 0;
       const elecVal = parseFloat(formData.electricity_cost as any) || 0;
       const waterVal = parseFloat(formData.water_cost as any) || 0;
@@ -184,7 +231,7 @@ export function Invoices() {
         electricity_cost: elecVal,
         water_cost: waterVal,
         other_fees: otherVal,
-        tenant_id: room?.current_assignment?.tenant_id || null,
+        tenant_id: room?.current_tenant?.id || room?.current_assignment?.tenant_id || null,
         total_amount: totalAmount,
         status: editingInvoice ? editingInvoice.status : ('pending' as const),
       };
@@ -216,39 +263,52 @@ export function Invoices() {
     }
   }
 
-  async function handleMarkPaid(invoice: Invoice) {
+  const handleMarkPaid = async (invoice: Invoice) => {
     try {
-      await markInvoicePaid(invoice.id);
+      await updateInvoice(invoice.id, { status: 'paid', paid_date: new Date().toISOString() });
       await loadData();
-    } catch (error) {
-      console.error('Failed to mark invoice as paid:', error);
-      alert('Không thể cập nhật trạng thái.');
+    } catch (err) {
+      console.error('Failed to mark invoice as paid', err);
     }
-  }
-
-  const filteredInvoices = invoices.filter((invoice) => {
-    const matchesStatus = filter === 'all' || invoice.status === filter;
-    const matchesYear = invoice.invoice_year === filterYear;
-    const matchesMonth = filterMonth === 0 || invoice.invoice_month === filterMonth;
-    return matchesStatus && matchesYear && matchesMonth;
-  });
-
-  const statusCounts = {
-    all: invoices.length,
-    pending: invoices.filter((i) => i.status === 'pending').length,
-    paid: invoices.filter((i) => i.status === 'paid').length,
-    overdue: invoices.filter((i) => i.status === 'overdue').length,
   };
 
-  const totalPending = invoices
+  const handleConfirmPayment = async (invoice: Invoice) => {
+    try {
+      await confirmPayment(invoice.id);
+      await loadData();
+      alert('Đã xác nhận thanh toán thành công!');
+    } catch (err) {
+      console.error('Failed to confirm payment', err);
+      alert('Có lỗi xảy ra khi xác nhận thanh toán.');
+    }
+  };
+
+  const userInvoices = isTenant 
+      ? allInvoices
+      : allInvoices;
+
+  const filteredInvoices = isTenant ? userInvoices : invoices; // Frontend handles tenant filtering
+
+  const statusCounts = {
+    pending: userInvoices.filter(i => i.status === 'pending').length,
+    paid: userInvoices.filter(i => i.status === 'paid').length,
+    overdue: userInvoices.filter(i => i.status === 'overdue').length,
+    waiting_confirmation: userInvoices.filter(i => i.status === 'waiting_confirmation').length,
+  };
+
+  const totalPending = userInvoices
     .filter((i) => i.status === 'pending')
     .reduce((sum, i) => sum + Number(i.total_amount), 0);
 
-  const totalPaid = invoices
+  const totalPaid = userInvoices
     .filter((i) => i.status === 'paid')
     .reduce((sum, i) => sum + Number(i.total_amount), 0);
 
   if (loading) return <Spinner />;
+
+  if (payingInvoice) {
+    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); loadData(); }} />;
+  }
 
   return (
     <div className="space-y-10">
@@ -258,10 +318,12 @@ export function Invoices() {
           <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Hóa đơn</h1>
           <p className="text-charcoal-400 mt-2 text-sm">Lập và quản lý hóa đơn thanh toán</p>
         </div>
-        <Button onClick={openCreateModal}>
-          <PiPlusLight className="w-4 h-4" />
-          Tạo hóa đơn
-        </Button>
+        {!isTenant && (
+          <Button onClick={openCreateModal}>
+            <Plus className="w-4 h-4 mr-2" />
+            Tạo hóa đơn
+          </Button>
+        )}
       </header>
 
       {/* Financial Summary */}
@@ -269,13 +331,13 @@ export function Invoices() {
         <div className="bg-sage-50 rounded-2xl border border-sage-100 p-6">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm text-charcoal-500 font-medium">Doanh thu đã thu</p>
+              <p className="text-sm text-charcoal-500 font-medium">{isTenant ? 'Đã thanh toán' : 'Doanh thu đã thu'}</p>
               <p className="text-2xl font-semibold text-charcoal-900 mt-2">
                 {totalPaid.toLocaleString('vi-VN')}đ
               </p>
             </div>
             <div className="w-10 h-10 rounded-full bg-sage-50 border border-sage-100 flex items-center justify-center">
-              <PiCheckCircleLight className="w-5 h-5 text-sage-600" />
+              <CheckCircle className="w-5 h-5 text-sage-600" />
             </div>
           </div>
         </div>
@@ -288,7 +350,7 @@ export function Invoices() {
               </p>
             </div>
             <div className="w-10 h-10 rounded-full bg-amber-50 border border-amber-100 flex items-center justify-center">
-              <PiClockLight className="w-5 h-5 text-amber-600" />
+              <Clock className="w-5 h-5 text-amber-600" />
             </div>
           </div>
         </div>
@@ -301,7 +363,7 @@ export function Invoices() {
               </p>
             </div>
             <div className="w-10 h-10 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center">
-              <PiWarningCircleLight className="w-5 h-5 text-rose-600" />
+              <AlertCircle className="w-5 h-5 text-rose-600" />
             </div>
           </div>
         </div>
@@ -310,25 +372,28 @@ export function Invoices() {
       {/* Filters */}
       <section className="space-y-4">
         <div className="flex gap-2 items-center flex-wrap">
-          {(['all', 'pending', 'paid', 'overdue'] as const).map((status) => (
-            <button
-              key={status}
-              onClick={() => setFilter(status)}
-              className={`px-5 py-2.5 text-sm font-medium rounded-xl transition-all ${
-                filter === status
-                  ? 'bg-white text-charcoal-900 shadow-card border border-charcoal-100'
-                  : 'text-charcoal-400 hover:text-charcoal-600 hover:bg-white/50'
-              }`}
-            >
-              {status === 'all' && 'Tất cả'}
-              {status === 'pending' && 'Chờ thanh toán'}
-              {status === 'paid' && 'Đã thanh toán'}
-              {status === 'overdue' && 'Quá hạn'}
-              <span className={`ml-2 px-2 py-0.5 rounded-lg text-xs ${
-                filter === status ? 'bg-wood-100 text-wood-700' : 'bg-charcoal-100 text-charcoal-500'
-              }`}>{statusCounts[status]}</span>
-            </button>
-          ))}
+          {(['all', 'pending', 'paid', 'overdue'] as const).map((status) => {
+            const count = status === 'all' ? userInvoices.length : statusCounts[status];
+            return (
+              <button
+                key={status}
+                onClick={() => setFilter(status)}
+                className={`px-5 py-2.5 text-sm font-medium rounded-xl transition-all ${
+                  filter === status
+                    ? 'bg-white text-charcoal-900 shadow-card border border-charcoal-100'
+                    : 'text-charcoal-400 hover:text-charcoal-600 hover:bg-white/50'
+                }`}
+              >
+                {status === 'all' && 'Tất cả'}
+                {status === 'pending' && 'Chờ thanh toán'}
+                {status === 'paid' && 'Đã thanh toán'}
+                {status === 'overdue' && 'Quá hạn'}
+                <span className={`ml-2 px-2 py-0.5 rounded-lg text-xs ${
+                  filter === status ? 'bg-wood-100 text-wood-700' : 'bg-charcoal-100 text-charcoal-500'
+                }`}>{count}</span>
+              </button>
+            )
+          })}
           <div className="ml-auto flex items-center gap-2">
             <FilterDropdown 
                 value={filterMonth.toString()}
@@ -341,10 +406,13 @@ export function Invoices() {
             <FilterDropdown 
                 value={filterYear.toString()}
                 onChange={(v) => setFilterYear(Number(v))}
-                options={Array.from({ length: 11 }, (_, i) => {
-                  const y = (new Date().getFullYear() - 5 + i).toString();
-                  return { value: y, label: y };
-                })}
+                options={[
+                  { value: '0', label: 'Tất cả năm' },
+                  ...Array.from({ length: 11 }, (_, i) => {
+                    const y = (new Date().getFullYear() - 5 + i).toString();
+                    return { value: y, label: y };
+                  })
+                ]}
               />
           </div>
         </div>
@@ -354,13 +422,14 @@ export function Invoices() {
       {filteredInvoices.length === 0 ? (
         <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card p-12">
           <EmptyState
-            icon={<PiReceiptLight className="w-10 h-10" />}
+            icon={<FileText className="w-10 h-10" />}
             title="Chưa có hóa đơn nào"
-            description="Bắt đầu tạo hóa đơn thanh toán cho khách thuê"
-            action={<Button onClick={openCreateModal}><PiPlusLight className="w-4 h-4" />Tạo hóa đơn</Button>}
+            description={isTenant ? "Bạn chưa có hóa đơn nào." : "Tạo hóa đơn đầu tiên cho người thuê phòng"}
+            action={!isTenant ? <Button onClick={openCreateModal}><Plus className="w-4 h-4 mr-2" />Tạo hóa đơn</Button> : undefined}
           />
         </div>
       ) : (
+        <>
         <div className="bg-white rounded-2xl border border-charcoal-100 shadow-card overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -386,7 +455,7 @@ export function Invoices() {
                     </div>
                   </td>
                   <td className="px-4 py-3 align-middle">
-                    <p className="font-serif lining-nums tabular-nums font-medium text-wood-700">P.{invoice.room?.room_number}</p>
+                    <p className="font-serif lining-nums tabular-nums font-medium text-wood-700">{invoice.room ? `P.${invoice.room.room_number}` : '—'}</p>
                     <p className="text-xs text-charcoal-400 mt-0.5">{invoice.tenant?.full_name || '—'}</p>
                   </td>
                   <td className="px-4 py-3 text-center align-middle text-charcoal-600 font-serif lining-nums tabular-nums font-medium">
@@ -402,31 +471,35 @@ export function Invoices() {
                     {invoice.due_date ? new Date(invoice.due_date).toLocaleDateString('vi-VN') : '—'}
                   </td>
                   <td className="px-4 py-3 align-middle">
-                    <InvoiceStatusBadge status={invoice.status} />
+                    <InvoiceStatusBadge status={invoice.status} isTenant={isTenant} />
                   </td>
                   <td className="px-4 py-3 align-middle text-right">
                     <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {invoice.status === 'pending' && (
-                        <button onClick={() => handleMarkPaid(invoice)} className="px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
-                          Thanh toán
-                        </button>
+                      {isTenant ? (
+                        <>
+                          {invoice.status === 'pending' && (
+                            <button onClick={() => setPayingInvoice(invoice)} className="px-3 py-1.5 text-xs font-medium text-white bg-wood-600 hover:bg-wood-700 rounded-lg transition-colors">
+                              Thanh toán
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {invoice.status === 'pending' && (
+                            <button onClick={() => handleMarkPaid(invoice)} className="px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
+                              Thanh toán
+                            </button>
+                          )}
+                          <button onClick={() => openEditModal(invoice)} disabled={invoice.status === 'paid'}
+                            className={`p-1.5 rounded-lg transition-colors ${invoice.status === 'paid' ? 'text-charcoal-200' : 'text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 bg-white border border-transparent hover:border-wood-200'}`}>
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => openDeleteModal(invoice)} disabled={invoice.status === 'paid'}
+                            className={`p-1.5 rounded-lg transition-colors ${invoice.status === 'paid' ? 'text-charcoal-200' : 'text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 bg-white border border-transparent hover:border-rose-200'}`}>
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
                       )}
-                      <button
-                        onClick={() => openEditModal(invoice)}
-                        className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200"
-                        disabled={invoice.status === 'paid'}
-                        title="Sửa"
-                      >
-                        <PiPencilSimpleLight className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => openDeleteModal(invoice)}
-                        className="p-1.5 rounded-lg text-charcoal-400 hover:text-rose-600 hover:bg-rose-50 transition-colors bg-white border border-transparent hover:border-rose-200"
-                        disabled={invoice.status === 'paid'}
-                        title="Xóa"
-                      >
-                        <PiTrashLight className="w-4 h-4" />
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -434,6 +507,20 @@ export function Invoices() {
             </tbody>
           </table>
         </div>
+        
+        {/* Pagination component */}
+        {!loading && filteredInvoices.length > 0 && (
+          <div className="mt-4">
+            <Pagination
+              currentPage={page}
+              totalPages={pagination.totalPages}
+              hasNextPage={pagination.hasNextPage}
+              hasPreviousPage={pagination.hasPreviousPage}
+              onPageChange={setPage}
+            />
+          </div>
+        )}
+        </>
       )}
 
       {/* Create/Edit Modal */}
@@ -463,15 +550,16 @@ export function Invoices() {
               ]}
             />
             <Input
-              label="Chỉ số điện nước (nếu có)"
+              label="Chỉ số điện nước (bắt buộc)"
               name="meter_reading_id"
               type="select"
+              required
               value={formData.meter_reading_id}
               onChange={handleReadingChange}
               options={[
-                { value: '', label: '-- Không sử dụng --' },
+                { value: '', label: '-- Chọn chỉ số --' },
                 ...readings
-                  .filter((r) => r.room_id === formData.room_id)
+                  .filter((r) => String(r.room_id) === String(formData.room_id))
                   .map((r) => ({
                     value: r.id,
                     label: `${new Date(r.reading_date).toLocaleDateString('vi-VN')}`,
@@ -511,6 +599,7 @@ export function Invoices() {
               onChange={(v) => setFormData({ ...formData, room_rent: v })}
               min={0}
               required
+              disabled={true}
             />
             <Input
               label="Hạn thanh toán"
@@ -528,6 +617,7 @@ export function Invoices() {
               value={formData.electricity_cost}
               onChange={(v) => setFormData({ ...formData, electricity_cost: v })}
               min={0}
+              disabled={true}
             />
             <Input
               label="Tiền nước (VNĐ)"
@@ -536,6 +626,7 @@ export function Invoices() {
               value={formData.water_cost}
               onChange={(v) => setFormData({ ...formData, water_cost: v })}
               min={0}
+              disabled={true}
             />
             <Input
               label="Phí khác (VNĐ)"
@@ -544,6 +635,7 @@ export function Invoices() {
               value={formData.other_fees}
               onChange={(v) => setFormData({ ...formData, other_fees: v })}
               min={0}
+              disabled={true}
             />
           </div>
           <Input
@@ -584,6 +676,50 @@ export function Invoices() {
         </form>
       </Modal>
 
+      {/* View Modal */}
+      <Modal
+        isOpen={!!viewingInvoice}
+        onClose={() => setViewingInvoice(null)}
+        title="Chi tiết hóa đơn"
+        size="md"
+      >
+        {viewingInvoice && (
+          <div className="p-6 space-y-4 text-sm text-charcoal-700">
+            <div className="flex justify-between items-center pb-4 border-b border-charcoal-100">
+              <span className="font-medium text-charcoal-500">Mã hóa đơn</span>
+              <span className="font-semibold">{viewingInvoice.ma_hoa_don || '—'}</span>
+            </div>
+            <div className="flex justify-between items-center pb-4 border-b border-charcoal-100">
+              <span className="font-medium text-charcoal-500">Kỳ hóa đơn</span>
+              <span className="font-semibold">Tháng {viewingInvoice.invoice_month}/{viewingInvoice.invoice_year}</span>
+            </div>
+            <div className="flex justify-between items-center pb-4 border-b border-charcoal-100">
+              <span className="font-medium text-charcoal-500">Tiền phòng</span>
+              <span className="font-medium">{viewingInvoice.room_rent.toLocaleString('vi-VN')}đ</span>
+            </div>
+            <div className="flex justify-between items-center pb-4 border-b border-charcoal-100">
+              <span className="font-medium text-charcoal-500">Tiền điện & nước</span>
+              <span className="font-medium">{(viewingInvoice.electricity_cost + viewingInvoice.water_cost).toLocaleString('vi-VN')}đ</span>
+            </div>
+            {viewingInvoice.other_fees > 0 && (
+              <div className="flex justify-between items-center pb-4 border-b border-charcoal-100">
+                <span className="font-medium text-charcoal-500">Chi phí khác</span>
+                <span className="font-medium">{viewingInvoice.other_fees.toLocaleString('vi-VN')}đ</span>
+              </div>
+            )}
+            <div className="flex justify-between items-center pt-2">
+              <span className="font-medium text-charcoal-900 text-base">Tổng cộng</span>
+              <span className="font-bold text-wood-700 text-xl">{viewingInvoice.total_amount.toLocaleString('vi-VN')}đ</span>
+            </div>
+            <div className="flex gap-3 mt-8 pt-4">
+              <Button type="button" className="w-full" variant="secondary" onClick={() => setViewingInvoice(null)}>
+                Đóng
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* Delete Modal */}
       <Modal
         isOpen={isDeleteModalOpen}
@@ -610,11 +746,28 @@ export function Invoices() {
   );
 }
 
-function InvoiceStatusBadge({ status }: { status: string }) {
-  const variants: Record<string, 'warning' | 'success' | 'danger'> = {
-    pending: 'warning',
+function InvoiceStatusBadge({
+  status,
+  isTenant,
+}: {
+  status: Invoice['status'];
+  isTenant?: boolean;
+}) {
+  const variants: Record<Invoice['status'], 'default' | 'success' | 'warning' | 'danger'> = {
+    pending: 'default',
     paid: 'success',
-    overdue: 'danger',
+    waiting_confirmation: 'warning',
+    overdue: isTenant ? 'warning' : 'danger',
   };
+  
+  if (isTenant && status === 'overdue') {
+    // Show as a warning badge with label 'Chưa thanh toán' for tenants instead of 'Quá hạn'
+    return (
+      <span className="inline-flex items-center justify-center font-medium px-2.5 py-1 text-sm bg-amber-100 text-amber-700 rounded-lg">
+        Chưa thanh toán
+      </span>
+    );
+  }
+  
   return <Badge status={status} variant={variants[status]} />;
 }

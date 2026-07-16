@@ -35,7 +35,7 @@ export function Input({
   rows = 3,
   className = '',
 }: InputProps) {
-  const inputClasses = `w-full px-3.5 py-2.5 rounded-2xl border ${
+  const inputClasses = `w-full px-3.5 py-2.5 rounded-xl border ${
     error
       ? 'border-rose-300 focus:ring-rose-400 focus:border-rose-400'
       : 'border-charcoal-200 focus:ring-wood-400 focus:border-wood-400'
@@ -99,7 +99,7 @@ export function Input({
       {label && (
         <label
           htmlFor={name}
-          className="block text-sm font-medium font-sans text-charcoal-800"
+          className="block text-sm font-medium text-charcoal-700"
         >
           {label}
           {required && <span className="text-rose-500 ml-1">*</span>}
@@ -116,7 +116,7 @@ interface StatCardProps {
   value: string | number;
   icon?: ReactNode;
   trend?: { value: number; label: string };
-  variant?: 'default' | 'wood' | 'sage' | 'amber' | 'rose';
+  variant?: 'default' | 'terra' | 'sage' | 'amber' | 'rose';
 }
 
 export function StatCard({
@@ -128,7 +128,7 @@ export function StatCard({
 }: StatCardProps) {
   const iconBgClasses = {
     default: 'bg-charcoal-100 text-charcoal-500',
-    wood: 'bg-wood-100 text-wood-600',
+    terra: 'bg-terra-100 text-terra-600',
     sage: 'bg-sage-100 text-sage-600',
     amber: 'bg-amber-100 text-amber-600',
     rose: 'bg-rose-100 text-rose-600',
@@ -149,7 +149,7 @@ export function StatCard({
           )}
         </div>
         {icon && (
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${iconBgClasses[variant]}`}>
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${iconBgClasses[variant]}`}>
             {icon}
           </div>
         )}
@@ -170,7 +170,7 @@ export function Badge({ status, variant = 'default', size = 'md' }: BadgeProps) 
     success: 'bg-sage-100 text-sage-700',
     warning: 'bg-amber-100 text-amber-700',
     danger: 'bg-rose-100 text-rose-700',
-    info: 'bg-wood-100 text-wood-700',
+    info: 'bg-terra-100 text-terra-700',
   };
 
   const sizeClasses = {
