@@ -164,7 +164,6 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
           </p>
           <ul className="list-disc pl-5 space-y-2">
             <li>Nội dung chuyển khoản (Mã hóa đơn) phải <strong>chính xác tuyệt đối</strong> để hệ thống tự động nhận diện.</li>
-            <li>Sau khi chuyển khoản thành công, màn hình này sẽ tự động cập nhật do hệ thống có kết nối API tự động.</li>
           </ul>
         </div>
       </div>

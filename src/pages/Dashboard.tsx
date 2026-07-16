@@ -12,10 +12,13 @@ import {
   PiWarningCircleLight,
   PiFileTextLight,
   PiPlusLight,
-  PiUserPlusLight
+  PiUserPlusLight,
+  PiPaperPlaneTiltLight,
+  PiBellLight
 } from 'react-icons/pi';
-import { Badge, Spinner } from '../components/ui/Input';
-import { getDashboardStats } from '../lib/api';
+import { Badge, Spinner, Input } from '../components/ui/Input';
+import { Button } from '../components/ui/Button';
+import { getDashboardStats, sendNotification } from '../lib/api';
 import type { Invoice, RepairRequest, Page } from '../types';
 
 const HERO_IMAGE = "https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=1600&q=80";
@@ -234,6 +237,83 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
         <RecentInvoices invoices={stats.recentInvoices} onNavigate={onNavigate} />
         <RecentRepairs repairs={stats.recentRepairs} onNavigate={onNavigate} />
       </section>
+
+      {/* Quick Notification */}
+      <section>
+        <QuickNotification />
+      </section>
+    </div>
+  );
+}
+
+function QuickNotification() {
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !content.trim()) return;
+    setLoading(true);
+    setSuccess(false);
+    try {
+      await sendNotification({
+        title: title.trim(),
+        content: content.trim(),
+        targetType: 'all'
+      });
+      setSuccess(true);
+      setTitle('');
+      setContent('');
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (error) {
+      console.error('Failed to send notification', error);
+      alert('Gửi thông báo thất bại');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-[1.5rem] border border-cream-200 shadow-soft p-6">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600">
+          <PiBellLight className="w-5 h-5" />
+        </div>
+        <div>
+          <h3 className="text-lg font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Thông báo nhanh</h3>
+          <p className="text-xs text-charcoal-400 mt-0.5">Gửi thông báo tức thì đến tất cả khách thuê</p>
+        </div>
+      </div>
+      
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Input
+          placeholder="Tiêu đề thông báo..."
+          name="title"
+          value={title}
+          onChange={setTitle}
+          required
+        />
+        <textarea
+          className="w-full px-4 py-2 border border-cream-200 rounded-xl focus:ring-2 focus:ring-charcoal-900 focus:border-transparent outline-none transition-all text-sm"
+          placeholder="Nội dung thông báo..."
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          rows={3}
+          required
+        />
+        <div className="flex items-center justify-end gap-3">
+          {success && <span className="text-sm text-sage-600 font-medium">Gửi thành công!</span>}
+          <Button type="submit" disabled={loading || !title.trim() || !content.trim()}>
+            {loading ? 'Đang gửi...' : (
+              <span className="flex items-center gap-2">
+                <PiPaperPlaneTiltLight className="w-4 h-4" /> Gửi thông báo
+              </span>
+            )}
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }

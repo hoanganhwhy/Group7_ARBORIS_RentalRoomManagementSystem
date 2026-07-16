@@ -73,3 +73,23 @@ Một tính năng hoặc nhiệm vụ (Task/Feature) chỉ được coi là **Đ
 * **Chạy tự động qua GitHub Actions**: 
   - Mọi Pull Request muốn merge vào `develop` hoặc `main` đều phải được chạy kiểm tra tự động qua luồng CI trên đám mây.
   - Kết quả kiểm thử và độ phủ mã nguồn sẽ được hiển thị trực tiếp trên giao diện GitHub PR để người quản lý phê duyệt.
+
+---
+
+## 5. Tích hợp Mô hình Trưởng thành Năng lực CMMI (CMMI Integration)
+
+Quy trình SDLC của HostelMate được thiết kế theo định hướng áp dụng các tiêu chuẩn của **CMMI (Capability Maturity Model Integration)**, tập trung vào **Level 3 (Defined)** và định hướng tiến lên **Level 4 & 5 (Quantitatively Managed & Optimizing)**.
+
+### Áp dụng CMMI vào dự án thực tế:
+
+1. **Chuẩn hóa quy trình (CMMI Level 3 - Defined)**: 
+   - Tất cả các quy trình từ viết code, commit (Angular Convention), đến quản lý nhánh (Git Flow) đều được tài liệu hóa rõ ràng trong `SDLC.md` và bắt buộc mọi thành viên tuân thủ.
+   - Các tiêu chuẩn chất lượng (Definition of Done) được xác định cụ thể làm kim chỉ nam cho việc nghiệm thu tính năng.
+
+2. **Quản lý định lượng (CMMI Level 4 - Quantitatively Managed)**: 
+   - Dự án sử dụng các công cụ đo lường tự động (CI/CD) để thu thập dữ liệu định lượng về chất lượng mã nguồn.
+   - Ví dụ: Yêu cầu bắt buộc **Code Coverage >= 70%** và **0 lỗi Linting**. Các chỉ số này được đo lường chính xác bằng các công cụ như Jest và ESLint, cung cấp dữ liệu thống kê để kiểm soát chất lượng quy trình phát triển.
+
+3. **Cải tiến liên tục (CMMI Level 5 - Optimizing)**: 
+   - Thông qua các báo cáo từ hệ thống CI (GitHub Actions), đội ngũ phát triển liên tục phân tích các điểm nghẽn (bottlenecks) và lỗi thường gặp để cải tiến kiến trúc mã nguồn.
+   - Mọi thay đổi về thư viện, cấu trúc dự án đều được cập nhật trở lại vào tài liệu `SDLC.md` và `README.md` nhằm mục đích tối ưu hóa luồng công việc, thích ứng nhanh chóng với sự thay đổi của yêu cầu kinh doanh.

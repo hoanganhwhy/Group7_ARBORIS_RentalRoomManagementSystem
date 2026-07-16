@@ -184,7 +184,6 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   }
 });
 
-
 app.post('/api/auth/google-login', async (req, res) => {
   const { token } = req.body;
   try {
@@ -270,18 +269,17 @@ export async function createNotification(io, { sender_id, target_type, target_te
     if (target_type === 'INDIVIDUAL' && target_tenant_id) {
       await run(`INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)`, [notification_id, target_tenant_id]);
     } else if (target_type === 'ALL') {
-      const tenants = await query('SELECT id FROM khach_thue WHERE trang_thai = "active" OR trang_thai = "ending"');
+      const tenants = await query('SELECT DISTINCT khach_thue_id AS id FROM hop_dong_thue WHERE dang_hoat_dong = 1');
       for (const t of tenants) {
         await run(`INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)`, [notification_id, t.id]);
       }
     } else if (target_type === 'AREA') {
       const tenants = await query(`
-        SELECT k.id 
-        FROM khach_thue k
-        JOIN hop_dong_thue hd ON k.id = hd.khach_thue_id
+        SELECT DISTINCT hd.khach_thue_id AS id 
+        FROM hop_dong_thue hd
         JOIN phong p ON hd.phong_id = p.id
         JOIN nha_tro nt ON p.nha_tro_id = nt.id
-        WHERE nt.ten_nha_tro = ? AND (k.trang_thai = "active" OR k.trang_thai = "ending")
+        WHERE nt.ten_nha_tro = ? AND hd.dang_hoat_dong = 1
       `, [target_tenant_id]);
       for (const t of tenants) {
         await run(`INSERT INTO notification_recipients (notification_id, tenant_id) VALUES (?, ?)`, [notification_id, t.id]);
@@ -890,7 +888,6 @@ app.post('/api/admin/users', authenticate, checkRole('ADMIN'), async (req, res) 
 // ----------------- AI CHATBOT API -----------------
 // Has been moved to src/routes/ai.routes.js
 
-
 // ----------------- TENANTS API -----------------
 app.get('/api/tenants', async (req, res) => {
   try {
@@ -948,8 +945,6 @@ app.post('/api/tenants', async (req, res) => {
       INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email, so_cccd, ngay_sinh, dia_chi, lien_he_khan_cap, ghi_chu)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [id, full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes]);
-
-
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [id]);
     res.status(201).json(mapTenant(tenant));
@@ -1027,7 +1022,6 @@ app.delete('/api/tenants/:id', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 
 // ----------------- ROOM ASSIGNMENTS API -----------------
 app.post('/api/room_assignments', async (req, res) => {
@@ -1177,7 +1171,6 @@ app.get('/api/room_assignments/expiring', async (req, res) => {
   }
 });
 
-
 // ----------------- METER READINGS API -----------------
 app.get('/api/meter_readings', async (req, res) => {
   try {
@@ -1241,15 +1234,6 @@ app.get('/api/meter_readings', async (req, res) => {
         hasNextPage: page * limit < totalItems, hasPreviousPage: page > 1
       }
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/meter_readings/room/:roomId', async (req, res) => {
-  try {
-    const data = await query('SELECT * FROM chi_so_dien_nuoc WHERE phong_id = ? ORDER BY ngay_ghi_so DESC', [req.params.roomId]);
-    res.json(data.map(mapReading));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1349,7 +1333,6 @@ app.delete('/api/meter_readings/:id', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 
 app.get('/api/tenant/portal', async (req, res) => {
   try {
@@ -1774,7 +1757,6 @@ app.put('/api/invoices/:id/paid', async (req, res) => {
   }
 });
 
-
 // ----------------- REPAIR REQUESTS API -----------------
 app.get('/api/landlord/contact', async (req, res) => {
   try {
@@ -2038,33 +2020,6 @@ setupContracts(app, query, queryOne, run);
 setupInvoices(app, query, queryOne, run);
 
 // ----------------- SETTINGS API -----------------
-app.get('/api/settings', async (req, res) => {
-  try {
-    const settings = await queryOne('SELECT * FROM cai_dat_he_thong WHERE id = "default"');
-    res.json(settings || {});
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.put('/api/settings', async (req, res) => {
-  console.log('PUT /api/settings request body:', req.body);
-  const { momo_number, momo_name, bank_name, bank_account, bank_owner } = req.body;
-  try {
-    await run(`
-      UPDATE cai_dat_he_thong 
-      SET momo_number = ?, momo_name = ?, bank_name = ?, bank_account = ?, bank_owner = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
-      WHERE id = 'default'
-    `, [momo_number, momo_name, bank_name, bank_account, bank_owner]);
-    
-    const settings = await queryOne('SELECT * FROM cai_dat_he_thong WHERE id = "default"');
-    console.log('Updated settings:', settings);
-    res.json(settings);
-  } catch (error) {
-    console.error('Error updating settings:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // ----------------- PAYMENTS API -----------------
 // Khách thuê báo cáo đã thanh toán (Tự động xác nhận cho môi trường test)
@@ -2105,23 +2060,6 @@ app.post('/api/invoices/:id/report-payment', async (req, res) => {
 });
 
 // Chủ nhà xác nhận đã nhận tiền
-app.patch('/api/admin/invoices/:id/confirm-payment', async (req, res) => {
-  const invoiceId = req.params.id;
-  try {
-    const invoice = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [invoiceId]);
-    if (!invoice) return res.status(404).json({ error: 'Không tìm thấy hóa đơn' });
-    if (invoice.trang_thai !== 'waiting_confirmation') return res.status(400).json({ error: 'Hóa đơn không ở trạng thái chờ xác nhận' });
-    
-    await run(`
-      UPDATE hoa_don 
-      SET trang_thai = 'paid', ngay_thanh_toan = CURRENT_TIMESTAMP, ngay_cap_nhat = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `, [invoiceId]);
-    res.json({ success: true, message: 'Đã xác nhận thanh toán thành công.' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 // Webhook SePay
 app.post('/api/webhooks/sepay', async (req, res) => {
@@ -2698,7 +2636,6 @@ async function cleanupDeletedItems() {
 }
 setInterval(cleanupDeletedItems, 24 * 60 * 60 * 1000); // run daily
 setTimeout(cleanupDeletedItems, 5000); // run 5 seconds after startup
-
 
 // Start server
 if (process.env.NODE_ENV !== 'test') {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { markNotificationAsRead } from '../lib/api';
-import { Bell, CheckCircle2, Circle, Wrench, DollarSign, FileText, Users, ArrowRight } from 'lucide-react';
+import { markNotificationAsRead, deleteNotification } from '../lib/api';
+import { Bell, CheckCircle2, Circle, Wrench, DollarSign, FileText, Users, ArrowRight, Trash2 } from 'lucide-react';
 import { Page } from '../types';
 
 export default function NotificationsTenant({ onNavigate }: { onNavigate?: (page: Page) => void }) {
@@ -40,6 +40,16 @@ export default function NotificationsTenant({ onNavigate }: { onNavigate?: (page
       setNotifications(prev => prev.map(notif => notif.id === n.id ? {...notif, is_read: 1} : notif));
     } catch (error) {
       console.error(error);
+    }
+  }
+
+  async function handleDelete(e: React.MouseEvent, id: number) {
+    e.stopPropagation();
+    try {
+      await deleteNotification(id);
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    } catch (error) {
+      console.error('Lỗi khi xóa thông báo:', error);
     }
   }
 
@@ -111,25 +121,33 @@ export default function NotificationsTenant({ onNavigate }: { onNavigate?: (page
                   {!n.is_read && (
                     <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${style.bg.replace('bg-', 'bg-').replace('100', '400')}`} />
                   )}
-                  
                   <div className="flex gap-5">
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${n.is_read ? 'bg-charcoal-50 text-charcoal-300' : `${style.bg} ${style.color}`}`}>
-                      <Icon className="w-6 h-6" />
-                    </div>
-                    
-                    <div className="flex-1 min-w-0 flex flex-col justify-center">
-                      <div className="flex items-start justify-between gap-4 mb-1">
-                        <h3 className={`text-lg font-serif tracking-tight truncate ${n.is_read ? 'text-charcoal-500' : 'text-charcoal-900'}`}>
-                          {n.title}
-                        </h3>
-                        <span className="text-[11px] font-medium text-charcoal-400 uppercase tracking-wider shrink-0 mt-1">
-                          {new Date(n.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-                        </span>
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${n.is_read ? 'bg-charcoal-50 text-charcoal-300' : `${style.bg} ${style.color}`}`}>
+                        <Icon className="w-6 h-6" />
                       </div>
-                      <p className={`text-sm leading-relaxed line-clamp-2 ${n.is_read ? 'text-charcoal-400' : 'text-charcoal-600'}`}>
-                        {n.content}
-                      </p>
-                    </div>
+                      
+                      <div className="flex-1 min-w-0 flex flex-col justify-center">
+                        <div className="flex items-start justify-between gap-4 mb-1">
+                          <h3 className={`text-lg font-serif tracking-tight truncate ${n.is_read ? 'text-charcoal-500' : 'text-charcoal-900'}`}>
+                            {n.title}
+                          </h3>
+                          <div className="flex items-center gap-3 shrink-0 mt-1">
+                            <span className="text-[11px] font-medium text-charcoal-400 uppercase tracking-wider">
+                              {new Date(n.created_at).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                            </span>
+                            <button
+                              onClick={(e) => handleDelete(e, n.id)}
+                              className="text-charcoal-300 hover:text-red-500 transition-colors p-1 rounded-full hover:bg-red-50"
+                              title="Xóa thông báo"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <p className={`text-sm leading-relaxed line-clamp-2 ${n.is_read ? 'text-charcoal-400' : 'text-charcoal-600'}`}>
+                          {n.content}
+                        </p>
+                      </div>
 
                     {n.action_url && (
                       <div className="flex flex-col items-end justify-center shrink-0 ml-4">
