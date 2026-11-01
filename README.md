@@ -231,7 +231,7 @@ Danh sách đầy đủ các endpoint và quyền truy cập nằm trong [API.md
 ## 11. Tích hợp liên tục (CI)
 
 Dự án đã được tích hợp **GitHub Actions** (`.github/workflows/ci.yml`). 
-Mỗi khi có code mới được Push hoặc Pull Request vào `main` và `develop`, GitHub sẽ tự động cài thư viện, chạy lint, kiểm tra TypeScript, build và chạy toàn bộ test kèm coverage trên Node.js 20 và 22.
+Mỗi khi có code mới được Push hoặc Pull Request vào `main` và `develop`, GitHub sẽ tự động cài thư viện, chạy lint, kiểm tra TypeScript, build và chạy toàn bộ test kèm coverage trên Node.js 22 và 24.
 
 ## 12. Bảo mật
 

@@ -22,8 +22,8 @@ try {
   const sqlite3 = require('sqlite3');
   db = new sqlite3.Database(dbPath);
 } catch {
-  // Node.js 22+ includes a built-in SQLite driver. This fallback is useful in
-  // restricted/offline environments where sqlite3 cannot download its native binary.
+  // sqlite3 is an optional dependency because its native binary does not install on
+  // every machine. Node.js 22.13+ has a built-in SQLite driver to fall back on.
   const { DatabaseSync } = require('node:sqlite');
   db = new DatabaseSync(dbPath);
   driver = 'node:sqlite';

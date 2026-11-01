@@ -2,7 +2,7 @@
 
 ## 1. Yêu cầu
 
-- Node.js 20 LTS trở lên và npm.
+- Node.js 22.13 trở lên và npm.
 - Git (nếu lấy mã nguồn từ GitHub).
 
 ## 2. Cài đặt

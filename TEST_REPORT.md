@@ -12,6 +12,8 @@ Ngày kiểm tra: 02/11/2026. Môi trường: Windows 11, Node.js 25.4.0.
 | `npm test` | 105/105 test đạt (4 bộ test) |
 | `npm run test:coverage` | Độ phủ dòng 85,86%, nhánh 71,11%, hàm 93,29% |
 
+Bộ test cũng đạt trên Node.js 22 và 24 khi không cài `sqlite3`, tức dùng driver `node:sqlite` có sẵn của Node.
+
 Độ phủ được đo trên toàn bộ backend, gồm cả `server.js`, `integrated-routes.js`, `contracts.js` và chatbot. Giao diện React chưa có test tự động.
 
 ## Kiểm tra thủ công trên trình duyệt
