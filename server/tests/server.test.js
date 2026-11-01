@@ -1,593 +1,496 @@
 import request from 'supertest';
 import app from '../server.js';
-import { closeDatabase, run, dbReady } from '../db.js';
+import { closeDatabase, dbReady, queryOne } from '../db.js';
 
-describe('HostelMate API Endpoints & Business Logic Unit Tests', () => {
-  
+let adminCookie = '';
+let tenantCookie = '';
+let otherTenantCookie = '';
+let roomId = '';
+let otherRoomId = '';
+let tenantId = '';
+let otherTenantId = '';
+let assignmentId = '';
+let invoiceId = '';
+let invoiceCode = '';
+let repairId = '';
+
+const asAdmin = (req) => req.set('Cookie', adminCookie);
+const asTenant = (req) => req.set('Cookie', tenantCookie);
+const asOtherTenant = (req) => req.set('Cookie', otherTenantCookie);
+
+const login = (username, password) => request(app).post('/api/auth/login').send({ username, password });
+
+const webhook = (body) => request(app)
+  .post('/api/webhooks/sepay')
+  .set('Authorization', 'Apikey test-webhook-key')
+  .send(body);
+
+describe('ARBORIS integrated API', () => {
   beforeAll(async () => {
-    // Wait until SQLite schema creation and sample data seeding are completed
     await dbReady;
-    process.env.BANK_ID = '970422';
-    process.env.BANK_ACCOUNT_NO = '0123456789';
-    process.env.BANK_ACCOUNT_NAME = 'HOSTELMATE TEST';
-    process.env.VIETQR_TEMPLATE = 'compact2';
-    process.env.PAYMENT_PREFIX = 'HM';
-    process.env.SEPAY_WEBHOOK_API_KEY = 'test-sepay-key';
-    process.env.SEPAY_ALLOWED_ACCOUNT_NUMBERS = '0123456789';
   });
 
   afterAll(async () => {
-    // Close SQLite database connection so Jest can exit cleanly
     await closeDatabase();
   });
 
-  describe('1. Rooms API (/api/rooms)', () => {
-    test('GET /api/rooms - Should return list of rooms', async () => {
-      const res = await request(app).get('/api/rooms');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBeGreaterThan(0);
+  describe('accounts', () => {
+    test('starts with an empty database and a hashed default admin', async () => {
+      const health = await request(app).get('/api/health');
+      expect(health.status).toBe(200);
+      expect(health.body.database).toMatchObject({
+        phong: 0,
+        khach_thue: 0,
+        hop_dong_thue: 0,
+        hoa_don: 0,
+        yeu_cau_sua_chua: 0,
+      });
+
+      const admin = await queryOne("SELECT password_hash FROM users WHERE username = 'admin'");
+      expect(admin.password_hash.startsWith('$2')).toBe(true);
+
+      const response = await login('admin', '123456');
+      expect(response.status).toBe(200);
+      expect(response.body.user.role).toBe('ADMIN');
+      adminCookie = response.headers['set-cookie'][0];
     });
 
-    test('GET /api/rooms/:id - Should return room detail', async () => {
-      const res = await request(app).get('/api/rooms/r1');
-      expect(res.status).toBe(200);
-      expect(res.body.room_number).toBe('101');
+    test('rejects a wrong password', async () => {
+      const response = await login('admin', 'wrong-password');
+      expect(response.status).toBe(401);
     });
 
-    test('GET /api/rooms/:id - Should return 404 for invalid room ID', async () => {
-      const res = await request(app).get('/api/rooms/invalid_room_id');
-      expect(res.status).toBe(404);
+    test('admin can create rooms, tenants, a contract and an account', async () => {
+      const room = await asAdmin(request(app).post('/api/rooms')).send({
+        room_number: 'T101',
+        floor: 1,
+        area_sqm: 25,
+        monthly_rent: 2500000,
+        max_occupants: 2,
+        location: 'Khu A',
+      });
+      expect(room.status).toBe(201);
+      roomId = room.body.id;
+
+      const otherRoom = await asAdmin(request(app).post('/api/rooms')).send({ room_number: 'T102', monthly_rent: 2000000 });
+      otherRoomId = otherRoom.body.id;
+
+      const tenant = await asAdmin(request(app).post('/api/tenants')).send({
+        full_name: 'Khách thuê Test',
+        phone: '0900000000',
+        email: 'tenant@test.local',
+      });
+      expect(tenant.status).toBe(201);
+      tenantId = tenant.body.id;
+
+      const otherTenant = await asAdmin(request(app).post('/api/tenants')).send({ full_name: 'Khách Khác', phone: '0900000001' });
+      otherTenantId = otherTenant.body.id;
+
+      const assignment = await asAdmin(request(app).post('/api/room_assignments')).send({
+        room_id: roomId,
+        tenant_id: tenantId,
+        start_date: '2026-07-01',
+        contract_end_date: '2027-07-01',
+        deposit_amount: 2500000,
+        is_primary: true,
+      });
+      expect(assignment.status).toBe(201);
+      assignmentId = assignment.body.id;
+
+      await asAdmin(request(app).post('/api/room_assignments')).send({
+        room_id: otherRoomId,
+        tenant_id: otherTenantId,
+        start_date: '2026-07-01',
+        deposit_amount: 0,
+      });
+
+      const account = await asAdmin(request(app).put(`/api/tenants/${tenantId}`)).send({
+        username: 'tenanttest',
+        password: '654321',
+      });
+      expect(account.status).toBe(200);
+      expect(account.body.username).toBe('tenanttest');
+      await asAdmin(request(app).put(`/api/tenants/${otherTenantId}`)).send({ username: 'tenantother', password: '123123' });
     });
 
-    test('POST /api/rooms - Should create a new room', async () => {
-      const payload = {
-        room_number: '999',
-        floor: 9,
-        area_sqm: '45.5',
-        monthly_rent: '4500000',
-        max_occupants: '4',
-        description: 'Phòng test vip'
-      };
-      const res = await request(app).post('/api/rooms').send(payload);
-      expect(res.status).toBe(201);
-      expect(res.body.room_number).toBe('999');
-      expect(res.body.area_sqm).toBe(45.5);
-      expect(res.body.monthly_rent).toBe(4500000);
+    test('tenant passwords are hashed and never returned by the API', async () => {
+      const stored = await queryOne('SELECT password FROM khach_thue WHERE id = ?', [tenantId]);
+      expect(stored.password.startsWith('$2')).toBe(true);
+
+      const tenants = await asAdmin(request(app).get('/api/tenants'));
+      expect(tenants.status).toBe(200);
+      for (const tenant of tenants.body) expect(tenant).not.toHaveProperty('password');
     });
 
-    test('PUT /api/rooms/:id - Should update room details', async () => {
-      const payload = {
-        description: 'Updated description for r2'
-      };
-      const res = await request(app).put('/api/rooms/r2').send(payload);
-      expect(res.status).toBe(200);
-      expect(res.body.description).toBe('Updated description for r2');
+    test('a new tenant must change the password, then the flag clears', async () => {
+      const first = await login('tenanttest', '654321');
+      expect(first.status).toBe(200);
+      expect(first.body.user.role).toBe('TENANT');
+      expect(first.body.require_password_change).toBe(true);
+      const firstCookie = first.headers['set-cookie'][0];
+
+      const wrongOld = await request(app).post('/api/auth/change-password').set('Cookie', firstCookie)
+        .send({ oldPassword: 'nope', newPassword: 'new-password' });
+      expect(wrongOld.status).toBe(400);
+
+      const changed = await request(app).post('/api/auth/change-password').set('Cookie', firstCookie)
+        .send({ oldPassword: '654321', newPassword: 'new-password' });
+      expect(changed.status).toBe(200);
+
+      // Changing the password ends the old session; the response carries a new one.
+      const oldSession = await request(app).get('/api/auth/me').set('Cookie', firstCookie);
+      expect(oldSession.status).toBe(401);
+      const newSession = await request(app).get('/api/auth/me').set('Cookie', changed.headers['set-cookie'][0]);
+      expect(newSession.status).toBe(200);
+      expect(newSession.body.user.must_change_password).toBe(false);
+
+      const second = await login('tenanttest', 'new-password');
+      expect(second.body.require_password_change).toBe(false);
+      tenantCookie = second.headers['set-cookie'][0];
+
+      const other = await login('tenantother', '123123');
+      otherTenantCookie = other.headers['set-cookie'][0];
     });
 
-    test('PUT /api/rooms/:id - Should return 404 if room to update not found', async () => {
-      const res = await request(app).put('/api/rooms/non_existent').send({ description: 'test' });
-      expect(res.status).toBe(404);
+    test('a username taken by the admin or another tenant is refused', async () => {
+      const taken = await asAdmin(request(app).put(`/api/tenants/${otherTenantId}`)).send({ username: 'tenanttest' });
+      expect(taken.status).toBe(400);
+      const admin = await asAdmin(request(app).put(`/api/tenants/${otherTenantId}`)).send({ username: 'admin' });
+      expect(admin.status).toBe(400);
     });
 
-    test('DELETE /api/rooms/:id - Should block deleting occupied room (Business rule)', async () => {
-      const res = await request(app).delete('/api/rooms/r1');
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Không thể xóa phòng đang có người thuê');
-    });
+    test('locking an account ends the session and blocks login', async () => {
+      const lock = await asAdmin(request(app).put(`/api/tenants/${otherTenantId}`)).send({ is_locked: true });
+      expect(lock.body.is_locked).toBe(true);
 
-    test('DELETE /api/rooms/:id - Should allow deleting available room', async () => {
-      const tempRoomId = 'temp_room';
-      await run(`
-        INSERT INTO phong (id, so_phong, tang, dien_tich, gia_phong, trang_thai)
-        VALUES (?, ?, 1, 20, 2000000, 'available')
-      `, [tempRoomId, '888']);
+      expect((await asOtherTenant(request(app).get('/api/auth/me'))).status).toBe(401);
+      expect((await login('tenantother', '123123')).status).toBe(403);
 
-      const res = await request(app).delete(`/api/rooms/${tempRoomId}`);
-      expect(res.status).toBe(204);
-    });
-  });
-
-  describe('2. Tenants API (/api/tenants)', () => {
-    test('GET /api/tenants - Should return list of tenants', async () => {
-      const res = await request(app).get('/api/tenants');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-    });
-
-    test('GET /api/tenants/:id - Should return tenant details', async () => {
-      const res = await request(app).get('/api/tenants/t1');
-      expect(res.status).toBe(200);
-      expect(res.body.full_name).toBe('Nguyễn Văn A');
-    });
-
-    test('GET /api/tenants/:id - Should return 404 for invalid tenant ID', async () => {
-      const res = await request(app).get('/api/tenants/non_existent');
-      expect(res.status).toBe(404);
-    });
-
-    test('POST /api/tenants - Should create tenant with international country code phone format (+84)', async () => {
-      const payload = {
-        full_name: 'Khách Quốc Tế',
-        phone: '+84988777666',
-        email: 'international@test.com',
-        id_card_number: '123456789012',
-        address: 'Hà Nội, Việt Nam'
-      };
-      const res = await request(app).post('/api/tenants').send(payload);
-      expect(res.status).toBe(201);
-      expect(res.body.phone).toBe('+84988777666');
-    });
-
-    test('PUT /api/tenants/:id - Should update tenant details', async () => {
-      const payload = {
-        full_name: 'Nguyen Van A (Updated)'
-      };
-      const res = await request(app).put('/api/tenants/t1').send(payload);
-      expect(res.status).toBe(200);
-      expect(res.body.full_name).toBe('Nguyen Van A (Updated)');
-    });
-
-    test('PUT /api/tenants/:id - Should return 404 if tenant to update not found', async () => {
-      const res = await request(app).put('/api/tenants/non_existent').send({ full_name: 'test' });
-      expect(res.status).toBe(404);
-    });
-
-    test('DELETE /api/tenants/:id - Should successfully delete tenant', async () => {
-      const tempTenantId = 'temp_tenant';
-      await run(`
-        INSERT INTO khach_thue (id, ho_ten, so_dien_thoai)
-        VALUES (?, 'Temp Tenant', '123')
-      `, [tempTenantId]);
-
-      const res = await request(app).delete(`/api/tenants/${tempTenantId}`);
-      expect(res.status).toBe(204);
-    });
-  });
-
-  describe('3. Meter Readings API (/api/meter_readings)', () => {
-    test('GET /api/meter_readings - Should return list of meter readings', async () => {
-      const res = await request(app).get('/api/meter_readings');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-    });
-
-    test('GET /api/meter_readings/room/:roomId - Should return room readings history', async () => {
-      const res = await request(app).get('/api/meter_readings/room/r1');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-    });
-
-    test('GET /api/meter_readings/latest/:roomId - Should return latest reading', async () => {
-      const res = await request(app).get('/api/meter_readings/latest/r1');
-      expect(res.status).toBe(200);
-      expect(res.body.room_id).toBe('r1');
-    });
-
-    test('POST /api/meter_readings - Should reject if electricity/water new is less than old (Business rule)', async () => {
-      const payload = {
-        room_id: 'r2',
-        reading_date: '2026-07-08',
-        electricity_old: '150',
-        electricity_new: '120', // Invalid: new < old
-        water_old: '50',
-        water_new: '60',
-        electricity_price_per_unit: '3500',
-        water_price_per_unit: '15000'
-      };
-      const res = await request(app).post('/api/meter_readings').send(payload);
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Chỉ số điện mới không được nhỏ hơn chỉ số cũ.');
-    });
-
-    test('POST /api/meter_readings - Should allow if valid values', async () => {
-      const payload = {
-        room_id: 'r2',
-        reading_date: '2026-07-08',
-        electricity_old: '100',
-        electricity_new: '230',
-        water_old: '40',
-        water_new: '55',
-        electricity_price_per_unit: '3500',
-        water_price_per_unit: '15000'
-      };
-      const res = await request(app).post('/api/meter_readings').send(payload);
-      expect(res.status).toBe(201);
-      expect(res.body.electricity_new).toBe(230);
-      expect(res.body.water_new).toBe(55);
-    });
-
-    test('PUT /api/meter_readings/:id - Should update reading details', async () => {
-      const payload = {
-        electricity_new: '250',
-        water_new: '60'
-      };
-      const res = await request(app).put('/api/meter_readings/mr1').send(payload);
-      expect(res.status).toBe(200);
-      expect(res.body.electricity_new).toBe(250);
-    });
-
-    test('DELETE /api/meter_readings/:id - Should successfully delete reading', async () => {
-      const tempReadingId = 'temp_reading';
-      await run(`
-        INSERT INTO chi_so_dien_nuoc (id, phong_id, ngay_ghi_so, so_dien_cu, so_dien_moi, so_nuoc_cu, so_nuoc_moi)
-        VALUES (?, 'r2', '2026-07-08', 0, 10, 0, 5)
-      `, [tempReadingId]);
-
-      const res = await request(app).delete(`/api/meter_readings/${tempReadingId}`);
-      expect(res.status).toBe(204);
+      await asAdmin(request(app).put(`/api/tenants/${otherTenantId}`)).send({ is_locked: false });
+      otherTenantCookie = (await login('tenantother', '123123')).headers['set-cookie'][0];
+      expect((await asOtherTenant(request(app).get('/api/auth/me'))).status).toBe(200);
     });
   });
 
-  describe('4. Invoices API (/api/invoices)', () => {
-    test('GET /api/invoices - Should return list of invoices', async () => {
-      const res = await request(app).get('/api/invoices');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
+  describe('access control', () => {
+    const adminRoutes = [
+      ['get', '/api/rooms'],
+      ['post', '/api/rooms'],
+      ['delete', '/api/rooms/x'],
+      ['get', '/api/tenants'],
+      ['put', '/api/tenants/x'],
+      ['delete', '/api/tenants/x'],
+      ['post', '/api/room_assignments'],
+      ['post', '/api/room_assignments/x/end'],
+      ['get', '/api/room_assignments/expiring'],
+      ['get', '/api/meter_readings'],
+      ['post', '/api/meter_readings'],
+      ['get', '/api/invoices/export'],
+      ['post', '/api/invoices'],
+      ['put', '/api/invoices/x'],
+      ['put', '/api/invoices/x/paid'],
+      ['delete', '/api/invoices/x'],
+      ['post', '/api/repair_requests'],
+      ['put', '/api/repair_requests/x'],
+      ['delete', '/api/repair_requests/x'],
+      ['post', '/api/contracts/x/generate'],
+      ['get', '/api/admin/users'],
+      ['put', '/api/settings'],
+    ];
+
+    test.each(adminRoutes)('%s %s requires login and the admin role', async (method, path) => {
+      expect((await request(app)[method](path)).status).toBe(401);
+      expect((await asTenant(request(app)[method](path))).status).toBe(403);
     });
 
-    test('GET /api/invoices/:id - Should return invoice detail', async () => {
-      const res = await request(app).get('/api/invoices/i1');
-      expect(res.status).toBe(200);
-      expect(res.body.room_id).toBe('r1');
+    test.each([
+      ['get', '/api/invoices'],
+      ['get', '/api/invoices/x'],
+      ['get', '/api/repair_requests'],
+      ['get', '/api/tenant/portal'],
+      ['get', '/api/contracts/x/download'],
+      ['post', '/api/contracts/x/sign'],
+      ['post', '/api/ai/chat'],
+    ])('%s %s requires login', async (method, path) => {
+      expect((await request(app)[method](path)).status).toBe(401);
     });
 
-    test('GET /api/invoices/export - Should return Excel-compatible CSV export of invoices', async () => {
-      const res = await request(app).get('/api/invoices/export');
-      expect(res.status).toBe(200);
-      expect(res.headers['content-type']).toContain('text/csv');
-      expect(res.headers['content-disposition']).toContain('attachment; filename=danh_sach_hoa_don.csv');
-      expect(res.text.startsWith('\ufeff')).toBe(true);
+    test('a forged token is rejected', async () => {
+      const response = await request(app).get('/api/rooms').set('Authorization', 'Bearer not-a-real-token');
+      expect(response.status).toBe(401);
     });
 
-    test('POST /api/invoices - Should create invoice successfully', async () => {
-      const payload = {
-        room_id: 'r1',
-        tenant_id: 't1',
+    test('the portal ignores a tenant_id belonging to someone else', async () => {
+      const portal = await asOtherTenant(request(app).get(`/api/tenant/portal?tenant_id=${tenantId}`));
+      expect(portal.status).toBe(200);
+      expect(portal.body.rentals).toHaveLength(1);
+      expect(portal.body.rentals[0].room.id).toBe(otherRoomId);
+    });
+
+    test('a tenant cannot sign or download another tenant\'s contract', async () => {
+      const signature = 'data:image/png;base64,iVBORw0KGgo=';
+      const sign = await asOtherTenant(request(app).post(`/api/contracts/${assignmentId}/sign`)).send({ signatureBase64: signature });
+      expect(sign.status).toBe(403);
+      const download = await asOtherTenant(request(app).get(`/api/contracts/${assignmentId}/download`));
+      expect(download.status).toBe(403);
+    });
+  });
+
+  describe('validation', () => {
+    test('rejects bad room data with a clear message', async () => {
+      expect((await asAdmin(request(app).post('/api/rooms')).send({})).status).toBe(400);
+      expect((await asAdmin(request(app).post('/api/rooms')).send({ room_number: 'X', monthly_rent: -1 })).status).toBe(400);
+      expect((await asAdmin(request(app).post('/api/rooms')).send({ room_number: 'X', max_occupants: 0 })).status).toBe(400);
+    });
+
+    test('a duplicate room number in the same area is refused', async () => {
+      const duplicate = await asAdmin(request(app).post('/api/rooms')).send({ room_number: 'T101', location: 'Khu A' });
+      expect(duplicate.status).toBe(400);
+    });
+
+    test('an occupied room cannot be marked empty or shrunk below its occupants', async () => {
+      const empty = await asAdmin(request(app).put(`/api/rooms/${roomId}`)).send({ status: 'available' });
+      expect(empty.status).toBe(400);
+      const shrink = await asAdmin(request(app).put(`/api/rooms/${roomId}`)).send({ max_occupants: 0 });
+      expect(shrink.status).toBe(400);
+    });
+
+    test('meter readings cannot be negative, go backwards or repeat a month', async () => {
+      const base = { room_id: roomId, reading_date: '2026-07-15', electricity_old: 100, electricity_new: 110, water_old: 10, water_new: 12 };
+      expect((await asAdmin(request(app).post('/api/meter_readings')).send({ ...base, electricity_old: -1 })).status).toBe(400);
+      expect((await asAdmin(request(app).post('/api/meter_readings')).send({ ...base, electricity_new: 90 })).status).toBe(400);
+      expect((await asAdmin(request(app).post('/api/meter_readings')).send(base)).status).toBe(201);
+      expect((await asAdmin(request(app).post('/api/meter_readings')).send({ ...base, reading_date: '2026-07-20' })).status).toBe(400);
+
+      const august = await asAdmin(request(app).post('/api/meter_readings')).send({ ...base, reading_date: '2026-08-15' });
+      expect(august.status).toBe(201);
+      const moved = await asAdmin(request(app).put(`/api/meter_readings/${august.body.id}`)).send({ reading_date: '2026-07-25' });
+      expect(moved.status).toBe(400);
+    });
+  });
+
+  describe('invoices and payments', () => {
+    test('the server computes the invoice total', async () => {
+      const invoice = await asAdmin(request(app).post('/api/invoices')).send({
+        room_id: roomId,
+        tenant_id: tenantId,
         invoice_month: 7,
         invoice_year: 2026,
         room_rent: 2500000,
-        electricity_cost: 350000,
-        water_cost: 150000,
-        other_fees: 50000,
-        total_amount: 3050000,
-        status: 'pending',
-        due_date: '2026-07-15'
-      };
-      const res = await request(app).post('/api/invoices').send(payload);
-      expect(res.status).toBe(201);
-      expect(res.body.room_rent).toBe(2500000);
-      expect(res.body.total_amount).toBe(3050000);
-    });
-
-    test('PUT /api/invoices/:id/paid - Should mark invoice as paid', async () => {
-      const id = 'inv_test';
-      await run(`
-        INSERT INTO hoa_don (id, phong_id, khach_thue_id, thang_hoa_don, nam_hoa_don, tien_phong, tong_tien, trang_thai)
-        VALUES (?, 'r1', 't1', 12, 2035, 2500000, 2500000, 'pending')
-      `, [id]);
-
-      const res = await request(app).put(`/api/invoices/${id}/paid`);
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe('paid');
-      expect(res.body.paid_date).toBeDefined();
-    });
-
-    test('PUT /api/invoices/:id - Should block editing a paid invoice', async () => {
-      const res = await request(app)
-        .put('/api/invoices/inv_test')
-        .send({ notes: 'Không được phép sửa' });
-
-      expect(res.status).toBe(409);
-      expect(res.body.error).toContain('đã bị khóa');
-    });
-
-    test('DELETE /api/invoices/:id - Should block deleting a paid invoice', async () => {
-      const res = await request(app).delete('/api/invoices/inv_test');
-
-      expect(res.status).toBe(409);
-      expect(res.body.error).toContain('đã bị khóa');
-    });
-
-    test('POST /api/invoices/mark-overdue - Should scan and mark overdue invoices', async () => {
-      const res = await request(app).post('/api/invoices/mark-overdue');
-      expect(res.status).toBe(200);
-      expect(res.body.message).toBe('Overdue invoices updated');
-    });
-
-    test('DELETE /api/invoices/:id - Should successfully delete invoice', async () => {
-      const id = 'inv_temp';
-      await run(`
-        INSERT INTO hoa_don (id, phong_id, khach_thue_id, thang_hoa_don, nam_hoa_don, tien_phong, tong_tien, trang_thai)
-        VALUES (?, 'r1', 't1', 1, 2040, 200000, 200000, 'pending')
-      `, [id]);
-
-      const res = await request(app).delete(`/api/invoices/${id}`);
-      expect(res.status).toBe(204);
-    });
-  });
-
-  describe('4B. VietQR & SePay payment flow', () => {
-    const invoiceId = 'inv_qr_test';
-    let paymentCode = '';
-
-    beforeAll(async () => {
-      await run(`
-        INSERT INTO hoa_don (
-          id, phong_id, khach_thue_id, thang_hoa_don, nam_hoa_don,
-          tien_phong, tong_tien, trang_thai, han_thanh_toan
-        ) VALUES (?, 'r1', 't1', 11, 2045, 3000000, 3000000, 'pending', '2045-11-15')
-      `, [invoiceId]);
-
-      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
-      paymentCode = paymentRes.body.payment_code;
-    });
-
-    test('GET /api/invoices/:id/payment - Should create VietQR payment information', async () => {
-      const res = await request(app).get(`/api/invoices/${invoiceId}/payment`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.payment_code).toMatch(/^HM[A-F0-9]{24}$/);
-      expect(res.body.required_amount).toBe(3000000);
-      expect(res.body.remaining_amount).toBe(3000000);
-      expect(res.body.qr_url).toContain('https://img.vietqr.io/image/970422-0123456789-compact2.png');
-      expect(res.body.qr_url).toContain(encodeURIComponent(res.body.payment_code));
-    });
-
-    test('POST /api/webhooks/sepay - Should reject an invalid API key', async () => {
-      const res = await request(app)
-        .post('/api/webhooks/sepay')
-        .set('Authorization', 'Apikey wrong-key')
-        .send({
-          id: 9000,
-          gateway: 'MB',
-          transactionDate: '2045-11-01 08:00:00',
-          accountNumber: '0123456789',
-          content: paymentCode,
-          transferType: 'in',
-          transferAmount: 1000000,
-          accumulated: 1000000,
-        });
-
-      expect(res.status).toBe(401);
-      expect(res.body.success).toBe(false);
-    });
-
-    test('POST /api/webhooks/sepay - Should record a partial payment', async () => {
-      const res = await request(app)
-        .post('/api/webhooks/sepay')
-        .set('Authorization', 'Apikey test-sepay-key')
-        .send({
-          id: 9001,
-          gateway: 'MB',
-          transactionDate: '2045-11-01 08:01:00',
-          accountNumber: '0123456789',
-          code: paymentCode,
-          content: `THANH TOAN ${paymentCode}`,
-          transferType: 'in',
-          transferAmount: 1000000,
-          accumulated: 5000000,
-          referenceCode: 'FT20450001',
-        });
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.matched_invoice).toBe(invoiceId);
-      expect(res.body.received_amount).toBe(1000000);
-      expect(res.body.invoice_paid).toBe(false);
-
-      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
-      expect(paymentRes.body.payment_status).toBe('partial');
-      expect(paymentRes.body.remaining_amount).toBe(2000000);
-    });
-
-    test('POST /api/webhooks/sepay - Should ignore a duplicate transaction', async () => {
-      const duplicate = await request(app)
-        .post('/api/webhooks/sepay')
-        .set('Authorization', 'Apikey test-sepay-key')
-        .send({
-          id: 9001,
-          gateway: 'MB',
-          transactionDate: '2045-11-01 08:01:00',
-          accountNumber: '0123456789',
-          code: paymentCode,
-          content: `THANH TOAN ${paymentCode}`,
-          transferType: 'in',
-          transferAmount: 1000000,
-          accumulated: 5000000,
-          referenceCode: 'FT20450001',
-        });
-
-      expect(duplicate.status).toBe(200);
-      expect(duplicate.body.duplicate).toBe(true);
-
-      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
-      expect(paymentRes.body.received_amount).toBe(1000000);
-    });
-
-    test('POST /api/webhooks/sepay - Should mark the invoice paid after enough money arrives', async () => {
-      const res = await request(app)
-        .post('/api/webhooks/sepay')
-        .set('Authorization', 'Apikey test-sepay-key')
-        .send({
-          id: 9002,
-          gateway: 'MB',
-          transactionDate: '2045-11-01 08:02:00',
-          accountNumber: '0123456789',
-          content: `THANH TOAN PHAN CON LAI ${paymentCode}`,
-          transferType: 'in',
-          transferAmount: 2000000,
-          accumulated: 7000000,
-          referenceCode: 'FT20450002',
-        });
-
-      expect(res.status).toBe(200);
-      expect(res.body.invoice_paid).toBe(true);
-      expect(res.body.received_amount).toBe(3000000);
-
-      const invoiceRes = await request(app).get(`/api/invoices/${invoiceId}`);
-      expect(invoiceRes.body.status).toBe('paid');
-
-      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
-      expect(paymentRes.body.payment_status).toBe('paid');
-      expect(paymentRes.body.remaining_amount).toBe(0);
-      expect(paymentRes.body.qr_locked).toBe(true);
-      expect(paymentRes.body.qr_url).toBeNull();
-      expect(paymentRes.body.transactions).toHaveLength(2);
-
-      const transactionsRes = await request(app).get('/api/bank-transactions?limit=10');
-      expect(transactionsRes.status).toBe(200);
-      expect(transactionsRes.body.some((item) => item.invoice_id === invoiceId)).toBe(true);
-    });
-
-    test('POST /api/webhooks/sepay - Should not re-apply a paid invoice code', async () => {
-      const res = await request(app)
-        .post('/api/webhooks/sepay')
-        .set('Authorization', 'Apikey test-sepay-key')
-        .send({
-          id: 9003,
-          gateway: 'MB',
-          transactionDate: '2045-11-01 08:03:00',
-          accountNumber: '0123456789',
-          content: `CHUYEN NHAM LAN NUA ${paymentCode}`,
-          transferType: 'in',
-          transferAmount: 500000,
-          accumulated: 7500000,
-          referenceCode: 'FT20450003',
-        });
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.matched_invoice).toBeNull();
-      expect(res.body.received_amount).toBe(0);
-      expect(res.body.invoice_paid).toBe(false);
-
-      const paymentRes = await request(app).get(`/api/invoices/${invoiceId}/payment`);
-      expect(paymentRes.body.received_amount).toBe(3000000);
-      expect(paymentRes.body.transactions).toHaveLength(2);
-
-      const transactionsRes = await request(app).get('/api/bank-transactions?limit=10');
-      const reusedCodeTransaction = transactionsRes.body.find(
-        (item) => item.provider_transaction_id === 'sepay:9003'
-      );
-      expect(reusedCodeTransaction).toBeDefined();
-      expect(reusedCodeTransaction.invoice_id).toBeNull();
-    });
-  });
-
-  describe('5. Repair Requests API (/api/repair_requests)', () => {
-    test('GET /api/repair_requests - Should return list of repair requests', async () => {
-      const res = await request(app).get('/api/repair_requests');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-    });
-
-    test('GET /api/repair_requests/:id - Should return request detail', async () => {
-      const res = await request(app).get('/api/repair_requests/rep1');
-      expect(res.status).toBe(200);
-      expect(res.body.title).toBe('Hỏng vòi nước');
-    });
-
-    test('POST /api/repair_requests - Should reject if reporting tenant is not assigned to the room (Business rule)', async () => {
-      const payload = {
-        room_id: 'r1',
-        tenant_id: 't3',
-        title: 'Bóng đèn bị cháy',
-        description: 'Báo hỏng phòng r1',
-        priority: 'medium',
-        status: 'new'
-      };
-      const res = await request(app).post('/api/repair_requests').send(payload);
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Người thuê này không có hợp đồng thuê hoạt động tại phòng này');
-    });
-
-    test('POST /api/repair_requests - Should accept if reporting tenant resides in the room', async () => {
-      const payload = {
-        room_id: 'r1',
-        tenant_id: 't1',
-        title: 'Vòi nước rò rỉ',
-        description: 'Vòi nước nhà vệ sinh rỉ nước liên tục',
-        priority: 'high',
-        status: 'new'
-      };
-      const res = await request(app).post('/api/repair_requests').send(payload);
-      expect(res.status).toBe(201);
-      expect(res.body.title).toBe('Vòi nước rò rỉ');
-    });
-
-    test('PUT /api/repair_requests/:id - Should update request details', async () => {
-      const payload = {
-        status: 'resolved',
-        resolution_notes: 'Đã sửa xong'
-      };
-      const res = await request(app).put('/api/repair_requests/rep1').send(payload);
-      expect(res.status).toBe(200);
-      expect(res.body.status).toBe('resolved');
-      expect(res.body.resolution_notes).toBe('Đã sửa xong');
-    });
-
-    test('DELETE /api/repair_requests/:id - Should successfully delete request', async () => {
-      const id = 'rep_temp';
-      await run(`
-        INSERT INTO yeu_cau_sua_chua (id, phong_id, tieu_de, trang_thai)
-        VALUES (?, 'r2', 'temp title', 'new')
-      `, [id]);
-
-      const res = await request(app).delete(`/api/repair_requests/${id}`);
-      expect(res.status).toBe(204);
-    });
-  });
-
-  describe('6. Assignments API (/api/room_assignments)', () => {
-    test('GET /api/room_assignments/expiring - Should return expiring assignments', async () => {
-      const res = await request(app).get('/api/room_assignments/expiring?withinDays=60');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-    });
-
-    test('POST /api/room_assignments - Should successfully create room assignment contract', async () => {
-      // Create a new tenant first
-      const tenantRes = await request(app).post('/api/tenants').send({
-        full_name: 'Khách Test Hợp Đồng',
-        phone: '+84988777123',
-        email: 'testhopdong@test.com',
-        id_card_number: '111222333444'
+        electricity_cost: 35000,
+        water_cost: 30000,
+        other_fees: 0,
+        total_amount: 1,
+        due_date: '2026-07-22',
       });
-      const tenantId = tenantRes.body.id;
+      expect(invoice.status).toBe(201);
+      expect(invoice.body.total_amount).toBe(2565000);
+      invoiceId = invoice.body.id;
+      invoiceCode = invoice.body.ma_hoa_don;
+    });
 
-      // Assign the new tenant to available room r2
-      const payload = {
-        room_id: 'r2',
+    test('a second invoice for the same room and month is refused', async () => {
+      const duplicate = await asAdmin(request(app).post('/api/invoices')).send({ room_id: roomId, invoice_month: 7, invoice_year: 2026, room_rent: 1 });
+      expect(duplicate.status).toBe(400);
+    });
+
+    test('a tenant only sees invoices for their own room', async () => {
+      const own = await asTenant(request(app).get('/api/invoices'));
+      expect(own.body.map((item) => item.id)).toEqual([invoiceId]);
+
+      const spoofed = await asOtherTenant(request(app).get(`/api/invoices?tenant_id=${tenantId}`));
+      expect(spoofed.body).toEqual([]);
+
+      expect((await asTenant(request(app).get(`/api/invoices/${invoiceId}`))).status).toBe(200);
+      expect((await asOtherTenant(request(app).get(`/api/invoices/${invoiceId}`))).status).toBe(403);
+    });
+
+    test('another tenant cannot report payment on the invoice', async () => {
+      const response = await asOtherTenant(request(app).post(`/api/invoices/${invoiceId}/report-payment`));
+      expect(response.status).toBe(403);
+    });
+
+    test('manual flow: tenant reports the transfer, admin confirms it', async () => {
+      const report = await asTenant(request(app).post(`/api/invoices/${invoiceId}/report-payment`));
+      expect(report.body.status).toBe('waiting_confirmation');
+
+      const confirm = await asAdmin(request(app).patch(`/api/admin/invoices/${invoiceId}/confirm-payment`));
+      expect(confirm.body.status).toBe('paid');
+
+      const again = await asTenant(request(app).post(`/api/invoices/${invoiceId}/report-payment`));
+      expect(again.status).toBe(400);
+    });
+
+    test('SePay webhook marks the correct invoice as paid and is idempotent', async () => {
+      const invoice = await asAdmin(request(app).post('/api/invoices')).send({
+        room_id: roomId,
         tenant_id: tenantId,
-        start_date: '2026-07-01',
-        deposit_amount: '5000000',
-        is_primary: true,
-        notes: 'Hợp đồng mới',
-        contract_end_date: '2027-07-01'
+        invoice_month: 8,
+        invoice_year: 2026,
+        room_rent: 1000000,
+      });
+      const body = {
+        id: 'TEST-TRANSACTION-001',
+        accountNumber: '0000000000',
+        transferType: 'in',
+        transferAmount: 1000000,
+        content: invoice.body.ma_hoa_don,
       };
-      const res = await request(app).post('/api/room_assignments').send(payload);
-      expect(res.status).toBe(201);
-      expect(res.body.tenant_id).toBe(tenantId);
-      expect(res.body.room_id).toBe('r2');
+
+      const first = await webhook(body);
+      expect(first.status).toBe(200);
+      expect(first.body).toEqual({ success: true });
+
+      const paid = await asAdmin(request(app).get(`/api/invoices/${invoice.body.id}`));
+      expect(paid.body.status).toBe('paid');
+
+      const duplicate = await webhook(body);
+      expect(duplicate.body).toEqual({ success: true });
+      const row = await queryOne('SELECT so_tien_da_nhan FROM hoa_don WHERE id = ?', [invoice.body.id]);
+      expect(row.so_tien_da_nhan).toBe(1000000);
     });
 
-    test('PUT /api/room_assignments/:id/primary - Should change primary tenant in room', async () => {
-      const res = await request(app).put('/api/room_assignments/a2/primary').send({ room_id: 'r3' });
-      expect(res.status).toBe(200);
-      expect(res.body.message).toContain('Primary tenant updated successfully');
+    test('SePay webhook rejects a wrong API key', async () => {
+      const response = await request(app).post('/api/webhooks/sepay').set('Authorization', 'Apikey wrong').send({ content: invoiceCode });
+      expect(response.status).toBe(401);
     });
 
-    test('PUT /api/room_assignments/:id/extend - Should extend assignment end date', async () => {
-      const res = await request(app).put('/api/room_assignments/a1/extend').send({ contract_end_date: '2028-12-31' });
-      expect(res.status).toBe(200);
-      expect(res.body.contract_end_date).toBe('2028-12-31');
+    test('the CSV export quotes values and neutralises spreadsheet formulas', async () => {
+      await asAdmin(request(app).put(`/api/tenants/${tenantId}`)).send({ full_name: '=HYPERLINK("x"),Nguyen' });
+      const csv = await asAdmin(request(app).get('/api/invoices/export'));
+      expect(csv.status).toBe(200);
+      expect(csv.text).toContain(`"'=HYPERLINK(""x""),Nguyen"`);
+      expect(csv.text).toContain(`"${invoiceCode}"`);
+      await asAdmin(request(app).put(`/api/tenants/${tenantId}`)).send({ full_name: 'Khách thuê Test' });
+    });
+  });
+
+  describe('repair requests', () => {
+    test('a tenant can create a request for their own room only', async () => {
+      const repair = await asTenant(request(app).post('/api/tenant/repair_requests')).send({
+        room_id: roomId,
+        title: 'Máy lạnh không hoạt động',
+        description: 'Cần kiểm tra',
+        priority: 'high',
+      });
+      expect(repair.status).toBe(201);
+      expect(repair.body.tenant_id).toBe(tenantId);
+      repairId = repair.body.id;
+
+      const otherRoom = await asTenant(request(app).post('/api/tenant/repair_requests')).send({ room_id: otherRoomId, title: 'Không phải phòng tôi' });
+      expect(otherRoom.status).toBe(400);
     });
 
-    test('POST /api/room_assignments/:id/end - Should end room assignment (check-out)', async () => {
-      const res = await request(app).post('/api/room_assignments/a1/end');
-      expect(res.status).toBe(200);
-      expect(res.body.message).toContain('ended successfully');
+    test('a tenant cannot read another room\'s request', async () => {
+      expect((await asOtherTenant(request(app).get(`/api/repair_requests/${repairId}`))).status).toBe(403);
+      expect((await asOtherTenant(request(app).get('/api/repair_requests'))).body).toEqual([]);
+    });
+
+    test('a tenant confirms the repair only after the admin resolves it', async () => {
+      const early = await asTenant(request(app).put(`/api/tenant/repair_requests/${repairId}/confirm`));
+      expect(early.status).toBe(400);
+
+      const resolved = await asAdmin(request(app).put(`/api/repair_requests/${repairId}`)).send({ status: 'resolved', resolution_notes: 'Đã thay tụ điện' });
+      expect(resolved.body.status).toBe('resolved');
+      expect(resolved.body.resolved_at).toBeTruthy();
+
+      const confirmed = await asTenant(request(app).put(`/api/tenant/repair_requests/${repairId}/confirm`));
+      expect(confirmed.body.status).toBe('closed');
+    });
+  });
+
+  describe('contracts', () => {
+    test('a tenant signs their own contract once and can download the PDF', async () => {
+      const signature = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==';
+      const invalid = await asTenant(request(app).post(`/api/contracts/${assignmentId}/sign`)).send({ signatureBase64: 'javascript:alert(1)' });
+      expect(invalid.status).toBe(400);
+
+      const signed = await asTenant(request(app).post(`/api/contracts/${assignmentId}/sign`)).send({ signatureBase64: signature });
+      expect(signed.status).toBe(200);
+
+      const twice = await asTenant(request(app).post(`/api/contracts/${assignmentId}/sign`)).send({ signatureBase64: signature });
+      expect(twice.status).toBe(400);
+
+      const pdf = await asTenant(request(app).get(`/api/contracts/${assignmentId}/download`));
+      expect(pdf.status).toBe(200);
+      expect(pdf.headers['content-type']).toContain('pdf');
+    });
+
+    test('a tenant can rent the same room again after each move-out', async () => {
+      const room = await asAdmin(request(app).post('/api/rooms')).send({ room_number: 'T103' });
+      const tenant = await asAdmin(request(app).post('/api/tenants')).send({ full_name: 'Khách Quay Lại' });
+      const assign = () => asAdmin(request(app).post('/api/room_assignments')).send({
+        room_id: room.body.id,
+        tenant_id: tenant.body.id,
+        start_date: '2026-07-01',
+        deposit_amount: 0,
+      });
+
+      for (let round = 0; round < 3; round += 1) {
+        const assignment = await assign();
+        expect(assignment.status).toBe(201);
+        const end = await asAdmin(request(app).post(`/api/room_assignments/${assignment.body.id}/end`));
+        expect(end.status).toBe(200);
+      }
+
+      const roomAfter = await asAdmin(request(app).get(`/api/rooms/${room.body.id}`));
+      expect(roomAfter.body.status).toBe('available');
+    });
+
+    test('ending a contract keeps a room that is under maintenance', async () => {
+      const room = await asAdmin(request(app).post('/api/rooms')).send({ room_number: 'T104' });
+      const tenant = await asAdmin(request(app).post('/api/tenants')).send({ full_name: 'Khách Bảo Trì' });
+      const assignment = await asAdmin(request(app).post('/api/room_assignments')).send({
+        room_id: room.body.id,
+        tenant_id: tenant.body.id,
+        start_date: '2026-07-01',
+        deposit_amount: 0,
+      });
+      await asAdmin(request(app).put(`/api/rooms/${room.body.id}`)).send({ status: 'maintenance' });
+      await asAdmin(request(app).post(`/api/room_assignments/${assignment.body.id}/end`));
+
+      const roomAfter = await asAdmin(request(app).get(`/api/rooms/${room.body.id}`));
+      expect(roomAfter.body.status).toBe('maintenance');
+    });
+  });
+
+  describe('misc', () => {
+    test('roommate requests without a title return 400 instead of crashing', async () => {
+      const response = await asTenant(request(app).post('/api/roommates')).send({});
+      expect(response.status).toBe(400);
+    });
+
+    test('unknown settings keys are refused', async () => {
+      const response = await asAdmin(request(app).put('/api/settings')).send({ jwt_secret: 'x' });
+      expect(response.status).toBe(400);
+    });
+
+    test('the chatbot reports a missing API key without failing the server', async () => {
+      const response = await asTenant(request(app).post('/api/ai/chat')).send({ message: 'Xin chào' });
+      expect(response.status).toBe(503);
+    });
+
+    test('an unknown API path returns JSON 404', async () => {
+      const response = await request(app).get('/api/does-not-exist');
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBeTruthy();
+    });
+
+    test('malformed JSON returns 400', async () => {
+      const response = await request(app).post('/api/auth/login').set('Content-Type', 'application/json').send('{bad');
+      expect(response.status).toBe(400);
+    });
+
+    test('admin can list tenant accounts', async () => {
+      const users = await asAdmin(request(app).get('/api/admin/users'));
+      expect(users.status).toBe(200);
+      expect(users.body.data.some((row) => row.tenant_id === tenantId && row.role === 'TENANT')).toBe(true);
+    });
+
+    test('logout clears the session cookie', async () => {
+      const response = await request(app).post('/api/auth/logout');
+      expect(response.status).toBe(200);
+      expect(response.headers['set-cookie'][0]).toContain('token=;');
     });
   });
 });

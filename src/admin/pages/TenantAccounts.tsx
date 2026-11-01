@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
-import { PiIdentificationBadgeLight, PiUserPlusLight, PiCheckCircleLight, PiEyeLight, PiEyeSlashLight, PiPhoneLight, PiCopyLight, PiArrowsClockwiseLight, PiLockKeyLight, PiTrashLight, PiUserLight, PiKeyLight } from 'react-icons/pi';
+import { PiIdentificationBadgeLight, PiUserPlusLight, PiCheckCircleLight, PiEyeLight, PiEyeSlashLight, PiCopyLight, PiArrowsClockwiseLight, PiLockKeyLight, PiTrashLight, PiUserLight, PiKeyLight } from 'react-icons/pi';
 import { getTenants, getRooms, updateTenant } from '../lib/api';
 import type { Tenant, Room } from '../types';
 import { EmptyState } from '../components/ui/Input';
+
+function generatePassword() {
+  const [value] = crypto.getRandomValues(new Uint32Array(1));
+  return String(100000 + (value % 900000));
+}
 
 export function TenantAccounts() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -51,20 +56,34 @@ export function TenantAccounts() {
 
   const generateAccount = async (tenant: Tenant) => {
     try {
-      const noAccents = tenant.full_name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const username = noAccents.replace(/\s+/g, '').toLowerCase();
-      const password = Math.floor(100000 + Math.random() * 900000).toString();
-      
+      const noAccents = tenant.full_name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D');
+      const baseUsername = noAccents.replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'khachthue';
+      const takenUsernames = new Set(tenants.map(t => t.username));
+      let username = baseUsername;
+      for (let suffix = 2; takenUsernames.has(username) || username === 'admin'; suffix += 1) {
+        username = `${baseUsername}${suffix}`;
+      }
+      const password = generatePassword();
+
       const updatedTenant = await updateTenant(tenant.id, { username, password });
-      setTenants(tenants.map(t => t.id === tenant.id ? updatedTenant : t));
+      // The server only stores a hash, so this is the one chance to show the password.
+      setTenants(tenants.map(t => t.id === tenant.id ? { ...updatedTenant, password } : t));
     } catch (error) {
       console.error('Lỗi khi tạo tài khoản:', error);
-      alert('Không thể tạo tài khoản, vui lòng thử lại!');
+      alert(error instanceof Error ? error.message : 'Không thể tạo tài khoản, vui lòng thử lại!');
     }
   };
 
   const copyToZalo = (tenant: Tenant) => {
-    const text = `Tài khoản App phòng trọ của bạn là:\n- Đăng nhập: ${tenant.username}\n- Mật khẩu: ${tenant.password}`;
+    if (!tenant.password) {
+      alert('Hệ thống chỉ lưu mật khẩu đã mã hóa nên không thể xem lại. Hãy dùng "Reset mật khẩu" để tạo mật khẩu mới rồi sao chép.');
+      return;
+    }
+    const text = `Tài khoản App phòng trọ của bạn là:\n- Đăng nhập: ${tenant.username}\n- Mật khẩu: ${tenant.password}\nVui lòng đổi mật khẩu sau khi đăng nhập lần đầu.`;
     navigator.clipboard.writeText(text);
     setCopiedId(tenant.id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -76,7 +95,7 @@ export function TenantAccounts() {
     try {
       const updatedTenant = await updateTenant(tenant.id, { username: null, password: null, google_email: null } as any);
       setTenants(tenants.map(t => t.id === tenant.id ? updatedTenant : t));
-    } catch (error) {
+    } catch {
       alert('Lỗi khi thu hồi tài khoản');
     }
   };
@@ -84,12 +103,22 @@ export function TenantAccounts() {
   const handleResetPassword = async (tenant: Tenant) => {
     if (!confirm(`Reset mật khẩu cho ${tenant.full_name}?`)) return;
     try {
-      const password = Math.floor(100000 + Math.random() * 900000).toString();
+      const password = generatePassword();
       const updatedTenant = await updateTenant(tenant.id, { password });
-      setTenants(tenants.map(t => t.id === tenant.id ? updatedTenant : t));
+      setTenants(tenants.map(t => t.id === tenant.id ? { ...updatedTenant, password } : t));
       alert(`Đã reset mật khẩu thành: ${password}`);
-    } catch (error) {
+    } catch {
       alert('Lỗi khi reset mật khẩu');
+    }
+  };
+
+  const toggleLockAccount = async (tenant: Tenant) => {
+    if (!confirm(`Bạn có chắc muốn ${tenant.is_locked ? 'mở khóa' : 'khóa'} tài khoản của ${tenant.full_name}?`)) return;
+    try {
+      const updatedTenant = await updateTenant(tenant.id, { is_locked: !tenant.is_locked } as any);
+      setTenants(tenants.map(t => t.id === tenant.id ? { ...updatedTenant, password: tenant.password } : t));
+    } catch {
+      alert('Lỗi khi cập nhật trạng thái khóa tài khoản');
     }
   };
 
@@ -188,10 +217,17 @@ export function TenantAccounts() {
                       </td>
                       <td className="px-4 py-3 align-middle">
                         {hasAccount ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider bg-sage-50 text-sage-600 border border-sage-100">
-                            <span className="w-1.5 h-1.5 rounded-full bg-sage-500"></span>
-                            Đã cấp TK
-                          </span>
+                          tenant.is_locked ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider bg-rose-50 text-rose-600 border border-rose-100">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                              Bị khóa
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider bg-sage-50 text-sage-600 border border-sage-100">
+                              <span className="w-1.5 h-1.5 rounded-full bg-sage-500"></span>
+                              Đã cấp TK
+                            </span>
+                          )
                         ) : (
                           <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider bg-charcoal-50 text-charcoal-500 border border-charcoal-100">
                             <span className="w-1.5 h-1.5 rounded-full bg-charcoal-300"></span>
@@ -209,14 +245,16 @@ export function TenantAccounts() {
                             <div className="flex items-center gap-2.5 group/pass">
                               <PiKeyLight className="w-4 h-4 text-charcoal-400 shrink-0" />
                               <span className={`font-mono text-charcoal-900 font-medium text-sm tracking-tight w-20`}>
-                                {visiblePasswords.has(tenant.id) ? (tenant.password || '******') : '••••••'}
+                                {tenant.password && visiblePasswords.has(tenant.id) ? tenant.password : '••••••'}
                               </span>
-                              <button 
-                                onClick={() => toggle(setVisiblePasswords, tenant.id)}
-                                className="p-0.5 text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 rounded transition-colors opacity-0 group-hover/pass:opacity-100"
-                              >
-                                {visiblePasswords.has(tenant.id) ? <PiEyeSlashLight className="w-4 h-4" /> : <PiEyeLight className="w-4 h-4" />}
-                              </button>
+                              {tenant.password && (
+                                <button 
+                                  onClick={() => toggle(setVisiblePasswords, tenant.id)}
+                                  className="p-0.5 text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 rounded transition-colors opacity-0 group-hover/pass:opacity-100"
+                                >
+                                  {visiblePasswords.has(tenant.id) ? <PiEyeSlashLight className="w-4 h-4" /> : <PiEyeLight className="w-4 h-4" />}
+                                </button>
+                              )}
                             </div>
                           </div>
                         ) : (
@@ -224,7 +262,7 @@ export function TenantAccounts() {
                         )}
                       </td>
                       <td className="px-4 py-3 align-middle text-right">
-                        <div className="flex justify-end items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                        <div className="flex justify-end items-center gap-1">
                           {hasAccount ? (
                             <>
                               <button 
@@ -246,9 +284,9 @@ export function TenantAccounts() {
                                 <PiArrowsClockwiseLight className="w-4 h-4" />
                               </button>
                               <button 
-                                onClick={() => alert('Tính năng Khóa tài khoản đang phát triển')}
-                                className="p-1.5 rounded-lg text-charcoal-400 hover:text-amber-600 hover:bg-amber-50 transition-colors bg-white border border-transparent hover:border-amber-200"
-                                title="Khóa tài khoản tạm thời"
+                                onClick={() => toggleLockAccount(tenant)}
+                                className={`p-1.5 rounded-lg transition-colors bg-white border border-transparent ${tenant.is_locked ? 'text-rose-600 bg-rose-50 border-rose-200' : 'text-charcoal-400 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-200'}`}
+                                title={tenant.is_locked ? "Mở khóa tài khoản" : "Khóa tài khoản tạm thời"}
                               >
                                 <PiLockKeyLight className="w-4 h-4" />
                               </button>

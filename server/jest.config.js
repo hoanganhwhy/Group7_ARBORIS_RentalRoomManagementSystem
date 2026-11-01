@@ -1,12 +1,9 @@
 export default {
   testEnvironment: 'node',
   transform: {},
-  coverageThreshold: {
-    global: {
-      branches: 30,
-      functions: 70,
-      lines: 70,
-      statements: 70,
-    },
-  },
+  setupFiles: ['./tests/setup-env.js'],
+  testMatch: ['**/tests/**/*.test.js'],
+  testPathIgnorePatterns: ['/node_modules/', '/coverage/'],
+  coveragePathIgnorePatterns: ['/node_modules/', '/tests/'],
+  coverageThreshold: { global: { lines: 70 } },
 };

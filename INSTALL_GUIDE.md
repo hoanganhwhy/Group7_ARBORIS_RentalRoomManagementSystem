@@ -1,73 +1,51 @@
-# Hướng Dẫn Cài Đặt, Khởi Chạy Dự Án & Cài Đặt Trình Xem SQLite
+# Hướng Dẫn Cài Đặt Và Chạy ARBORIS
 
-Tài liệu này hướng dẫn chi tiết cách cài đặt môi trường, khởi chạy hệ thống HostelMate và cài đặt công cụ quản trị giao diện để quản lý cơ sở dữ liệu SQLite (`csdl_hostelmate.sqlite`).
+## 1. Yêu cầu
 
----
+- Node.js 20 LTS trở lên và npm.
+- Git (nếu lấy mã nguồn từ GitHub).
 
-## 1. Hướng Dẫn Cài Đặt Trình Xem Cơ Sở Dữ Liệu SQLite (DB Browser for SQLite)
+## 2. Cài đặt
 
-Do SQLite là hệ quản trị cơ sở dữ liệu dạng file (không chạy dạng dịch vụ ngầm như MySQL hay SQL Server), bạn cần một ứng dụng giao diện (GUI) để mở và xem dữ liệu bên trong các bảng.
-
-Công cụ tốt nhất, hoàn toàn miễn phí và phổ biến nhất là **DB Browser for SQLite**.
-
-### 🛠️ Các bước tải và sử dụng:
-
-1. **Bước 1: Tải ứng dụng**
-   Truy cập trang chủ chính thức hoặc tải trực tiếp theo các liên kết dưới đây:
-   * **Trang chủ**: [https://sqlitebrowser.org/dl/](https://sqlitebrowser.org/dl/)
-   * **Bản cài đặt thông thường (Standard 64-bit Windows)**: [Tải File .msi](https://github.com/sqlitebrowser/sqlitebrowser/releases/download/v3.12.2/DB.Browser.for.SQLite-3.12.2-win64.msi)
-   * **Bản chạy ngay không cần cài đặt (Portable 64-bit Windows)**: [Tải File .zip](https://github.com/sqlitebrowser/sqlitebrowser/releases/download/v3.12.2/DB.Browser.for.SQLite-3.12.2-win64.zip) *(Khuyên dùng: Giải nén ra là chạy được ngay, không cần cài đặt vào hệ thống)*.
-
-2. **Bước 2: Mở file Cơ sở dữ liệu của dự án**
-   * Mở ứng dụng **DB Browser for SQLite** vừa tải về.
-   * Nhấn nút **Open Database** (Mở cơ sở dữ liệu) ở góc trên bên trái màn hình.
-   * Tìm đến đường dẫn file SQLite của dự án tại:
-     `e:\Quan Li Phong Tro\HostelMate\server\csdl_hostelmate.sqlite`
-   * Chọn file và nhấn **Open**.
-
-3. **Bước 3: Xem và truy vấn dữ liệu**
-   * **Database Structure (Cấu trúc DB)**: Xem danh sách các bảng bằng tiếng Việt như: `phong`, `khach_thue`, `hop_dong_thue`, `chi_so_dien_nuoc`, `hoa_don`, `yeu_cau_sua_chua`.
-   * **Browse Data (Duyệt dữ liệu)**: Chọn bảng mong muốn để xem trực tiếp các dòng dữ liệu dạng bảng Excel.
-   * **Execute SQL (Thực thi SQL)**: Gõ các câu lệnh SQL truy vấn thủ công theo nhu cầu của bạn.
-
----
-
-## 2. Hướng Dẫn Cài Đặt & Khởi Chạy Dự Án Cục Bộ
-
-### Bước 1: Khai báo Node.js Portable vào biến môi trường PATH
-Mở PowerShell tại thư mục gốc dự án `HostelMate` và thực hiện lệnh:
-```powershell
-$env:PATH = "e:\Quan Li Phong Tro\HostelMate\.node-portable;" + $env:PATH
-```
-
-### Bước 2: Cài đặt thư viện (Dependencies)
-```powershell
-# Cài đặt thư viện của root và frontend
+```bash
 npm install
-
-# Cài đặt thư viện của backend server
 npm --prefix server install
 ```
 
-### Bước 3: Khởi chạy dự án
-```powershell
+Sao chép `.env.example` thành `.env` rồi điền thông tin ngân hàng. Dự án vẫn chạy được khi chưa có `.env`, nhưng sẽ không tạo được mã VietQR.
+
+## 3. Chạy dự án
+
+```bash
 npm run dev:all
 ```
-* **Frontend React (HostelMate)**: Mở trình duyệt truy cập [http://localhost:5174/](http://localhost:5174/)
-* **Backend API Express**: Chạy ngầm tại [http://localhost:5000/](http://localhost:5000/)
 
----
+Trên Windows có thể bấm đúp `START_ARBORIS.bat`, file này tự cài thư viện ở lần chạy đầu.
 
-## 3. Hướng Dẫn Chạy Kiểm Thử (Unit Test & Lint)
+- Giao diện: http://localhost:5173
+- API: http://localhost:5000
+- Kiểm tra server: http://localhost:5000/api/health
+- Tài khoản mặc định: `admin` / `123456` (đổi ngay sau khi đăng nhập)
 
-Mở PowerShell tại thư mục `HostelMate` (đã nạp PATH ở bước 2):
+## 4. Xem cơ sở dữ liệu
 
-* **Chạy kiểm tra code style (Linter)**:
-  ```powershell
-  npm run lint
-  ```
-* **Chạy 40 bài Unit Test backend & in báo cáo độ phủ mã nguồn (Coverage)**:
-  ```powershell
-  npm run test:server
-  ```
-  *(Độ phủ dòng code hiện tại đạt **84.81%**, vượt tiêu chuẩn tối thiểu **70%**).*
+Database được tạo tự động tại `server/hostelmate.sqlite` ở lần chạy đầu và không được đưa lên Git. Có thể mở bằng [DB Browser for SQLite](https://sqlitebrowser.org/dl/). Các bảng chính: `phong`, `khach_thue`, `hop_dong_thue`, `chi_so_dien_nuoc`, `hoa_don`, `yeu_cau_sua_chua`.
+
+Để đưa dữ liệu về trạng thái sạch, chạy `npm run reset-db` hoặc `RESET_DATABASE.bat`.
+
+## 5. Kiểm thử
+
+```bash
+npm run lint
+npm run verify
+npm test
+npm run test:coverage
+```
+
+## 6. Webhook SePay (tùy chọn)
+
+1. Điền `SEPAY_WEBHOOK_API_KEY` và `SEPAY_ALLOWED_ACCOUNT_NUMBERS` trong `.env`.
+2. Chạy `START_CLOUDFLARED.bat` để mở tunnel tới cổng 5000.
+3. Khai báo URL `https://<ten-mien-cloudflared>/api/webhooks/sepay` trên SePay.
+
+Nếu không dùng webhook, người thuê bấm **Tôi đã chuyển khoản** và Admin xác nhận tại mục **Hóa đơn > Cần xác nhận**.

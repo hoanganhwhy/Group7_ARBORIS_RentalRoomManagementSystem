@@ -1,120 +1,251 @@
-# HostelMate - Hệ Thống Quản Lý Phòng Trọ Chuyên Nghiệp
+# ARBORIS – Hệ thống quản lý phòng trọ tích hợp
 
-HostelMate là giải pháp phần mềm quản lý phòng trọ, căn hộ dịch vụ và nhà cho thuê toàn diện, được xây dựng trên nền tảng **React (Frontend)** và **Node.js Express + SQLite (Backend)**. 
+Phiên bản này hợp nhất hai dự án thành **một ứng dụng, một API và một database SQLite**:
 
-Dự án tích hợp đầy đủ quy trình kiểm thử tự động (Unit Test), kiểm tra tĩnh code style (ESLint), tài liệu phát triển (SDLC), và luồng tích hợp liên tục (GitHub Actions CI) đảm bảo chất lượng vận hành cao nhất.
+- **Admin:** giao diện và quy trình quản lý lấy từ dự án `Quan Li Phong Tro`.
+- **Khách thuê:** giao diện và chức năng lấy từ dự án `Group7_ARBORIS`.
+- Mục **“chữa lành”** đã được sửa thành **“Sửa chữa”**.
+- Dữ liệu Admin và khách thuê được đồng bộ trong cùng file `server/hostelmate.sqlite`.
 
----
+## 1. Tài khoản mặc định
 
-## 1. Các Phân Hệ & Tính Năng Chính
+| Vai trò | Tên đăng nhập | Mật khẩu |
+|---|---|---|
+| Admin | `admin` | `123456` |
 
-* **🏠 Phân hệ Quản lý Phòng trọ (Rooms API)**: Theo dõi thông tin chi tiết các phòng trọ, số tầng, diện tích, giá phòng, trạng thái phòng (`available`, `occupied`, `maintenance`) và sức chứa tối đa. Chặn xóa phòng nếu đang có người thuê.
-* **👥 Phân hệ Quản lý Khách thuê (Tenants API)**: Lưu trữ hồ sơ thông tin cá nhân khách thuê, tích hợp mã số điện thoại quốc gia định dạng chuẩn E.164 (mặc định Việt Nam `+84` và hỗ trợ nhiều quốc gia khác).
-* **📄 Phân hệ Hợp đồng & Thuê phòng (Room Assignments API)**: Thực hiện nghiệp vụ check-in nhận phòng, gán khách thuê đại diện (chịu trách nhiệm chính), gia hạn thời hạn hợp đồng và thanh lý hợp đồng (check-out) tự động cập nhật trạng thái phòng.
-* **⚡ Phân hệ Chỉ số Điện nước (Meter Readings API)**: Ghi nhận lịch sử tiêu thụ số điện, số nước tiêu thụ thực tế hàng tháng của từng phòng. Hệ thống tự động ràng buộc chỉ số mới phải lớn hơn hoặc bằng chỉ số cũ để tránh số âm.
-* **🧾 Phân hệ Quản lý Hóa đơn (Invoices API)**: Tự động hóa việc lập phiếu thu tiền phòng trọ và dịch vụ (tiền phòng + điện + nước + chi phí khác). Cho phép chọn linh hoạt **Tháng/Năm** qua dropdown tránh nhầm lẫn và tích hợp tính năng **xuất hóa đơn Excel/CSV** chuẩn UTF-8 BOM hiển thị đầy đủ tiếng Việt không lỗi font.
-* **🛠️ Phân hệ Báo hỏng & Sửa chữa (Repair Requests API)**: Tiếp nhận sự cố dịch vụ từ khách thuê (thiết bị hỏng hóc trong phòng). Nghiệp vụ ràng buộc người báo hỏng phải là khách thuê đang ở thực tế trong phòng đó.
+Database được tạo tự động ở lần chạy đầu tiên và chưa có phòng, người thuê, hợp đồng, điện nước, hóa đơn, yêu cầu sửa chữa hay giao dịch. Hãy đổi mật khẩu `admin` ngay sau khi đăng nhập lần đầu.
 
----
+## 2. Khởi động nhanh trên Windows
 
-## 2. Công Nghệ Áp Dụng (Tech Stack)
-
-* **Client**: ReactJS v18+, Vite, TypeScript, Lucide Icons, Vanilla CSS.
-* **Server**: Node.js v20+, Express framework.
-* **Database**: SQLite3 (sử dụng thư viện `sqlite3` kết nối trực tiếp nhẹ nhàng, lưu trữ tại `server/csdl_hostelmate.sqlite`).
-* **Quality Assurance / Testing**:
-  - **Jest & Supertest**: Chạy 40 unit tests kiểm thử API tự động trên bộ nhớ (:memory:), cô lập hoàn toàn.
-  - **ESLint**: Quét tĩnh toàn bộ dự án, đồng bộ hóa quy tắc viết code trên cả frontend và backend.
-* **DevOps**: GitHub Actions (Tự động chạy CI kiểm thử và rà soát độ phủ mã nguồn tối thiểu 70% mỗi khi Push hoặc PR).
-
----
-
-## 3. Cấu Trúc Thư Mục Dự Án
+Chạy file:
 
 ```text
-HostelMate/
-├── .github/
-│   └── workflows/
-│       └── ci.yml               # Cấu hình GitHub Actions CI chạy tự động
-├── server/
-│   ├── tests/
-│   │   └── server.test.js       # Bộ 40 unit test cases backend
-│   ├── csdl_hostelmate.sqlite   # Cơ sở dữ liệu SQLite chính của ứng dụng
-│   ├── db.js                    # Kết nối database, tạo bảng và seed dữ liệu mẫu
-│   ├── eslint.config.js         # Cấu hình quy tắc kiểm tra code style backend
-│   ├── jest.config.js           # Cấu hình Jest test và ngưỡng coverage tối thiểu 70%
-│   ├── package.json             # Khai báo thư viện phụ thuộc và script test backend
-│   └── server.js                # Khởi tạo API server Express
-├── src/                         # Mã nguồn giao diện người dùng (React Frontend)
-│   ├── components/              # Các UI components dùng chung
-│   ├── pages/                   # Các trang giao diện (Rooms, Tenants, Invoices...)
-│   └── App.tsx                  # Khởi chạy giao diện chính
-├── package.json                 # Cấu hình package và script khởi chạy toàn hệ thống
-├── eslint.config.js             # Cấu hình quy tắc linter của root và frontend
-├── SDLC.md                      # Tài liệu quy trình DoD, Git workflow, commit convention
-├── mau_import_phong.csv         # File mẫu Excel/CSV danh sách phòng trọ
-├── mau_import_khach_thue.csv    # File mẫu Excel/CSV danh sách khách thuê
-├── tong_hop_excel_test_backend.csv  # Báo cáo Excel kết quả kiểm thử backend
-├── file_test_case_nghiep_vu.csv # Bảng thiết kế Test Case nghiệp vụ điện nước chuẩn mẫu
-└── README.md                    # Tài liệu hướng dẫn sử dụng và giới thiệu tổng quan
+START_ARBORIS.bat
 ```
 
----
+Sau đó mở:
 
-## 4. Hướng Dẫn Cài Đặt & Khởi Chạy Cục Bộ
-
-### Bước 1: Khai báo Node.js Portable vào PATH (Dành cho máy chạy Windows)
-Mở PowerShell tại thư mục `HostelMate` và thiết lập biến môi trường để sử dụng đúng bộ Node chạy di động được tích hợp:
-
-```powershell
-$env:PATH = "e:\Quan Li Phong Tro\HostelMate\.node-portable;" + $env:PATH
+```text
+http://localhost:5173
 ```
 
-### Bước 2: Cài đặt Dependencies
-```powershell
-# Cài đặt thư viện của root và frontend
+Lần đầu chạy, file `.bat` tự cài thư viện nếu chưa có `node_modules`.
+
+### Chạy bằng lệnh
+
+```bash
 npm install
-
-# Cài đặt thư viện của backend server
-npm --prefix server install
-```
-
-### Bước 3: Khởi chạy Ứng dụng
-```powershell
+cd server
+npm install
+cd ..
 npm run dev:all
 ```
-Lệnh trên sẽ chạy song song cả client và server:
-* **Giao diện Client**: [http://localhost:5174](http://localhost:5174)
-* **Backend API**: [http://localhost:5000](http://localhost:5000)
 
----
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:5000`
+- Kiểm tra server: `http://localhost:5000/api/health`
 
-## 5. Hướng Dẫn Chạy Kiểm Thử & Kiểm Code Style
+## 3. Quy trình sử dụng chuẩn
 
-Đảm bảo mã nguồn của bạn sạch đẹp và vượt qua tất cả các bài test trước khi đẩy lên GitHub:
+1. Đăng nhập Admin bằng `admin / 123456`.
+2. Vào **Phòng trọ** để tạo phòng.
+3. Vào **Người thuê** để thêm khách thuê và xếp khách vào phòng.
+4. Vào **Tài khoản** để sinh tên đăng nhập và mật khẩu cho khách.
+5. Nhập chỉ số tại **Điện nước**.
+6. Tạo hóa đơn tại **Hóa đơn**.
+7. Khách thuê đăng nhập bằng tài khoản vừa được cấp và sử dụng:
+   - Tổng quan phòng đang thuê;
+   - Xem và thanh toán hóa đơn bằng VietQR;
+   - Ký/tải hợp đồng;
+   - Gửi và theo dõi yêu cầu **Sửa chữa**;
+   - Chatbot Gemini khi đã cấu hình API key.
 
-### A. Kiểm tra Code Style (Linter)
-```powershell
-npm run lint
+## 4. Database dùng chung
+
+File database duy nhất:
+
+```text
+server/hostelmate.sqlite
 ```
-*Yêu cầu nghiệm thu: Trả về thành công, không phát hiện lỗi cú pháp.*
 
-### B. Chạy Unit Test Backend & In Báo Cáo Coverage
-```powershell
-npm run test:server
+Dữ liệu được giữ lại sau khi tắt và mở lại hệ thống. Để đưa dự án về trạng thái sạch chỉ còn tài khoản Admin:
+
+```bash
+npm run reset-db
 ```
-*Yêu cầu nghiệm thu: Vượt qua đầy đủ 40/40 test cases, độ phủ code (Coverage) hiển thị trên console phải đạt tối thiểu **70%** (Hiện tại đang đạt **84.81%**).*
 
----
+Hoặc chạy:
 
-## 6. Tiêu Chuẩn Phát Triển (SDLC)
-Chi tiết xem tại tài liệu **[SDLC.md](file:///e:/Quan%20Li%20Phong%20Tro/HostelMate/SDLC.md)**, lưu ý 3 điểm chính:
-1. **Git Workflow**: Chỉ merge code qua Pull Request vào các nhánh `develop` và `main` sau khi CI báo xanh.
-2. **Commit Convention**: Commit bắt buộc theo chuẩn Angular (ví dụ: `feat(rooms): ...`, `fix(invoices): ...`).
-3. **Definition of Done**: Một tính năng chỉ hoàn thành khi code sạch linter, test pass, coverage >= 70%, và chạy CI thành công.
+```text
+RESET_DATABASE.bat
+```
 
-## Thanh toán QR và biến động số dư
+Muốn tự động xóa dữ liệu mỗi lần server khởi động, đặt trong `.env`:
 
-Dự án đã được bổ sung luồng VietQR + SePay: tạo QR theo từng hóa đơn, nhận webhook giao dịch, chống ghi trùng, hỗ trợ thanh toán một phần và tự đánh dấu hóa đơn đã thanh toán.
+```env
+RESET_DB_ON_START=true
+```
 
-Xem hướng dẫn đầy đủ tại [`HUONG_DAN_THANH_TOAN_QR_SEPAY.md`](./HUONG_DAN_THANH_TOAN_QR_SEPAY.md).
+> Không nên bật tùy chọn này khi dùng dữ liệu thật.
+
+## 5. Cấu hình `.env`
+
+Sao chép `.env.example` thành `.env` rồi điền các giá trị của bạn. Không commit file `.env` lên GitHub:
+
+```env
+PORT=5000
+JWT_SECRET=replace_with_a_long_random_secret
+VITE_API_URL=/api
+CORS_ORIGINS=
+
+GOOGLE_CLIENT_ID=
+VITE_GOOGLE_CLIENT_ID=
+
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
+
+SEPAY_WEBHOOK_API_KEY=your_webhook_secret
+
+BANK_ID=your_bank_bin
+BANK_ACCOUNT_NO=your_account_number
+BANK_ACCOUNT_NAME="YOUR ACCOUNT NAME"
+VIETQR_TEMPLATE=compact2
+PAYMENT_PREFIX=HM
+SEPAY_ALLOWED_ACCOUNT_NUMBERS=your_account_number
+LANDLORD_NAME=Chủ trọ ARBORIS
+LANDLORD_PHONE=
+```
+
+### VietQR
+
+Ba biến bắt buộc để tạo QR đúng tài khoản nhận tiền:
+
+- `BANK_ID`: mã ngân hàng, ví dụ `970422`.
+- `BANK_ACCOUNT_NO`: số tài khoản nhận tiền.
+- `BANK_ACCOUNT_NAME`: tên chủ tài khoản.
+
+Nội dung chuyển khoản sử dụng mã hóa đơn có tiền tố `HM` để webhook tìm đúng hóa đơn.
+
+### SePay webhook
+
+Chạy backend và mở tunnel:
+
+```text
+START_CLOUDFLARED.bat
+```
+
+Sau đó cấu hình URL webhook trên SePay:
+
+```text
+https://<ten-mien-cloudflared>/api/webhooks/sepay
+```
+
+Có thể dùng đường dẫn tương thích:
+
+```text
+https://<ten-mien-cloudflared>/api/payments/webhook
+```
+
+Điền cùng giá trị vào `SEPAY_WEBHOOK_API_KEY`. Hệ thống có chống xử lý trùng giao dịch theo mã tham chiếu.
+
+Khi webhook không hoạt động (chưa có tunnel hoặc token SePay hết hạn), người thuê bấm **Tôi đã chuyển khoản** trên trang thanh toán; hóa đơn chuyển sang mục **Cần xác nhận** để Admin đối chiếu và xác nhận thủ công.
+
+### Gemini chatbot
+
+Điền `GEMINI_API_KEY`. Chatbot chỉ truy vấn và hỗ trợ theo dữ liệu/phạm vi nghiệp vụ của dự án; khi chưa có key, API trả thông báo chưa cấu hình thay vì làm server bị dừng.
+
+## 6. Chức năng đã hợp nhất
+
+### Admin
+
+- Tổng quan thống kê;
+- Quản lý phòng và trạng thái phòng;
+- Quản lý người thuê;
+- Xếp phòng, kết thúc/gia hạn hợp đồng;
+- Cấp, reset và thu hồi tài khoản khách thuê;
+- Ghi chỉ số điện nước;
+- Tạo, sửa, xóa và xác nhận hóa đơn;
+- Tự động tiếp nhận yêu cầu sửa chữa do khách thuê gửi;
+- Xem chi tiết, phân công người xử lý, phản hồi và cập nhật trạng thái yêu cầu;
+- Admin không tự tạo hoặc xóa yêu cầu sửa chữa;
+
+### Khách thuê
+
+- Dashboard theo đúng phòng được Admin xếp;
+- Xem các thành viên cùng phòng và thông tin hợp đồng;
+- Ký và tải PDF hợp đồng;
+- Xem hóa đơn, VietQR và trạng thái thanh toán thời gian thực;
+- Gửi yêu cầu sửa chữa;
+- Cập nhật hồ sơ và đổi mật khẩu;
+- Chatbot Gemini.
+
+## 7. Sơ đồ quy trình (Flow Diagrams)
+
+### Sơ đồ Luồng Thanh toán VietQR & SePay Webhook
+```mermaid
+sequenceDiagram
+    participant Tenant as Khách thuê
+    participant Frontend as ARBORIS Frontend
+    participant Backend as API Server
+    participant SePay as SePay Webhook
+    participant Bank as Ngân hàng
+    
+    Tenant->>Frontend: Bấm "Thanh toán VietQR"
+    Frontend->>Backend: Gọi API tạo mã QR
+    Backend-->>Frontend: Trả về link ảnh QR (vietqr.io)
+    Frontend-->>Tenant: Hiển thị mã QR
+    Tenant->>Bank: Quét mã QR & Chuyển khoản (Nội dung: HM-XXXX)
+    Bank-->>SePay: Thông báo biến động số dư
+    SePay->>Backend: POST /api/webhooks/sepay (Data giao dịch)
+    Backend->>Backend: Khớp mã hóa đơn (HM-XXXX)
+    Backend->>Backend: Đổi trạng thái hóa đơn -> "paid"
+    Backend-->>Frontend: Bắn sự kiện Socket.io cập nhật UI
+    Frontend-->>Tenant: Hiển thị "Đã thanh toán"
+```
+
+## 8. Tài liệu API (API Documentation)
+
+Danh sách đầy đủ các endpoint và quyền truy cập nằm trong [API.md](API.md). Đăng nhập qua `POST /api/auth/login`; server trả JWT trong cookie `httpOnly`. Có thể gửi token bằng header `Authorization: Bearer <token>`.
+
+## 9. Code Quality & SonarQube
+<img width="1114" height="292" alt="image" src="https://github.com/user-attachments/assets/0425086c-ff1f-4871-94c7-d3f9ba44f530" />
+
+
+
+## 10. Kiểm tra mã nguồn & Kiểm thử (Testing)
+
+1. **API test (Jest + Supertest)**: kiểm tra phân quyền, nghiệp vụ, hóa đơn, webhook và chatbot trên database SQLite trong bộ nhớ. Lệnh coverage sẽ báo lỗi nếu độ phủ dòng dưới 70%.
+   ```bash
+   npm test
+   npm run test:coverage
+   ```
+2. **Linting**:
+   ```bash
+   npm run lint
+   ```
+3. **Kiểm tra TypeScript & Build**:
+   ```bash
+   npm run verify
+   ```
+
+## 11. Tích hợp liên tục (CI)
+
+Dự án đã được tích hợp **GitHub Actions** (`.github/workflows/ci.yml`). 
+Mỗi khi có code mới được Push hoặc Pull Request vào `main` và `develop`, GitHub sẽ tự động cài thư viện, chạy lint, kiểm tra TypeScript, build và chạy toàn bộ test kèm coverage trên Node.js 20 và 22.
+
+## 12. Bảo mật
+
+- Mọi API nghiệp vụ đều yêu cầu đăng nhập; các thao tác quản trị chỉ dành cho Admin.
+- Người thuê chỉ đọc được hóa đơn, yêu cầu sửa chữa, hợp đồng và trang tổng quan của chính mình; `tenant_id` gửi từ trình duyệt không có tác dụng.
+- Mật khẩu được băm bằng bcrypt và không bao giờ được API trả về. Database cũ có mật khẩu dạng chữ thường sẽ tự được băm khi server khởi động.
+- Tài khoản mới do Admin cấp phải đổi mật khẩu ở lần đăng nhập đầu. Đổi hoặc reset mật khẩu, khóa hay thu hồi tài khoản sẽ kết thúc các phiên đang mở.
+- Socket.IO chỉ nhận kết nối đã đăng nhập; đăng nhập sai bị giới hạn 20 lần mỗi 15 phút; chatbot giới hạn 20 tin nhắn mỗi phút.
+
+## 13. Lưu ý triển khai
+
+- Không đẩy file `.env` chứa key thật lên GitHub.
+- Không công khai file SQLite khi có dữ liệu thật; `.gitignore` đã loại `*.sqlite` và `server/uploads/`.
+- Khi `NODE_ENV=production`, server sẽ không khởi động nếu thiếu `JWT_SECRET`, và cần khai báo domain frontend trong `CORS_ORIGINS`.
+- Đổi mật khẩu Admin trước khi triển khai Internet.
+- Luôn đặt `SEPAY_WEBHOOK_API_KEY`: nếu để trống, webhook sẽ chấp nhận mọi request.
+- Cloudflared URL miễn phí thường thay đổi sau mỗi lần chạy; phải cập nhật lại URL webhook trên SePay.

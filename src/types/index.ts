@@ -1,5 +1,22 @@
+export interface User {
+  id: string;
+  username: string;
+  role: 'ADMIN' | 'TENANT';
+  tenant_id: string | null;
+  full_name?: string;
+  phone?: string;
+  email?: string;
+  cccd?: string;
+  date_of_birth?: string;
+  address?: string;
+  is_locked?: boolean;
+  must_change_password?: boolean;
+}
+
+
 export interface Room {
   id: string;
+  area: string;
   room_number: string;
   floor: number;
   area_sqm: number;
@@ -7,6 +24,12 @@ export interface Room {
   status: 'available' | 'occupied' | 'maintenance';
   max_occupants: number;
   description: string | null;
+  address?: string | null;
+  distance_km?: number;
+  air_conditioner?: boolean;
+  washing_machine?: boolean;
+  furnished?: boolean;
+  balcony?: boolean;
   created_at: string;
   updated_at: string;
   current_tenant?: Tenant | null;
@@ -25,6 +48,10 @@ export interface Tenant {
   address: string | null;
   emergency_contact: string | null;
   notes: string | null;
+  is_locked?: boolean;
+  username?: string | null;
+  password?: string | null;
+  google_email?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -63,6 +90,8 @@ export interface MeterReading {
 
 export interface Invoice {
   id: string;
+  ma_hoa_don: string;
+  qrUrl?: string;
   room_id: string;
   tenant_id: string | null;
   meter_reading_id: string | null;
@@ -73,7 +102,7 @@ export interface Invoice {
   water_cost: number;
   other_fees: number;
   total_amount: number;
-  status: 'pending' | 'paid' | 'overdue';
+  status: 'pending' | 'paid' | 'overdue' | 'waiting_confirmation' | 'review_needed';
   due_date: string | null;
   paid_date: string | null;
   notes: string | null;
@@ -102,42 +131,27 @@ export interface RepairRequest {
   tenant?: Tenant;
 }
 
-
-export interface BankTransaction {
-  id: string;
-  provider: string;
-  provider_transaction_id: string;
-  reference_code: string | null;
-  gateway: string | null;
-  account_number: string | null;
-  transfer_type: 'in' | 'out';
-  amount: number;
-  accumulated: number | null;
-  content: string | null;
-  payment_code: string | null;
-  invoice_id: string | null;
-  transaction_date: string | null;
-  created_at: string;
+export interface RoommateRequest {
+  id: number;
+  khach_thue_id?: number;
+  phong_id?: number;
+  tieu_de: string;
+  mo_ta: string | null;
+  gia_chia_se: number;
+  trang_thai?: 'open' | 'closed';
+  ngay_dang: string;
+  ngay_cap_nhat?: string;
+  // Bổ sung các trường từ JOIN query
+  so_phong?: string;
+  dien_tich?: number;
+  dieu_hoa?: number;
+  may_giat?: number;
+  noi_that?: number;
+  ban_cong?: number;
+  dia_chi?: string | null;
+  ten_nha_tro?: string | null;
+  ho_ten?: string;
+  so_dien_thoai?: string | null;
 }
 
-export interface InvoicePaymentInfo {
-  invoice_id: string;
-  room_number: string;
-  tenant_name: string | null;
-  invoice_status: Invoice['status'];
-  payment_status: 'pending' | 'partial' | 'paid';
-  payment_code: string;
-  required_amount: number;
-  received_amount: number;
-  remaining_amount: number;
-  bank: {
-    bank_id: string;
-    account_number: string;
-    account_name: string;
-  };
-  qr_locked: boolean;
-  qr_url: string | null;
-  transactions: BankTransaction[];
-}
-
-export type Page = 'dashboard' | 'rooms' | 'tenants' | 'meter-readings' | 'invoices' | 'repairs';
+export type Page = 'dashboard' | 'rooms' | 'tenants' | 'tenant-accounts' | 'meter-readings' | 'invoices' | 'repairs';

@@ -1,6 +1,6 @@
-# Quy trình Phát triển Phần mềm (SDLC) - HostelMate
+# Quy trình Phát triển Phần mềm (SDLC) - ARBORIS
 
-Tài liệu này định nghĩa quy trình phát triển (SDLC), tiêu chuẩn chất lượng (Definition of Done), quy định commit (Commit Convention) và luồng làm việc với Git (Git Workflow) của dự án HostelMate.
+Tài liệu này định nghĩa quy trình phát triển (SDLC), tiêu chuẩn chất lượng (Definition of Done), quy định commit (Commit Convention) và luồng làm việc với Git (Git Workflow) của dự án ARBORIS.
 
 ---
 
