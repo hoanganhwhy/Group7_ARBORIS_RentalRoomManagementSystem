@@ -113,7 +113,7 @@ export function Tenants() {
   const parsedPhone = parsePhone(formData.phone);
 
   useEffect(() => {
-    loadData();
+    void loadData();
     
     const handleOpenModal = (e: any) => {
       if (e.detail?.action === 'new-tenant') {

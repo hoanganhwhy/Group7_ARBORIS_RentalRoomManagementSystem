@@ -44,7 +44,7 @@ export function MeterReadings() {
   const [loadingPrevious, setLoadingPrevious] = useState(false);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   async function loadData() {

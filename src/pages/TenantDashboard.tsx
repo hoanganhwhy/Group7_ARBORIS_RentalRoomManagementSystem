@@ -43,8 +43,8 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
 
   useEffect(() => {
     if (user?.tenant_id) {
-      loadPortalData();
-      loadRepairSummary();
+      void loadPortalData();
+      void loadRepairSummary();
     }
   }, [user]);
 
@@ -107,7 +107,7 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
         alert('Ký hợp đồng thành công!');
         setIsSignModalOpen(false);
         setSigningAssignmentId(null);
-        loadPortalData();
+        void loadPortalData();
       } else {
         const data = await res.json().catch(() => ({}));
         alert(data.error || 'Lỗi khi ký hợp đồng');
@@ -125,7 +125,7 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
   };
 
   if (payingInvoice) {
-    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); loadPortalData(); loadRepairSummary(); }} />;
+    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); void loadPortalData(); void loadRepairSummary(); }} />;
   }
 
   const rentals: any[] = portalData?.rentals || (portalData?.assignment ? [{

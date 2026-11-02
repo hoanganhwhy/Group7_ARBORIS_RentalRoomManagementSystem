@@ -53,7 +53,7 @@ export function Invoices() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    loadData();
+    void loadData();
 
     const handleOpenModal = (e: any) => {
       if (e.detail?.action === 'new-invoice') {

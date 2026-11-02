@@ -96,7 +96,7 @@ export function Rooms() {
   });
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { void loadData(); }, []);
 
   async function loadData() {
     try {
@@ -360,7 +360,7 @@ export function Rooms() {
       await Promise.all(Array.from(selectedRooms).map(id => updateRoom(id, { status: bulkStatus })));
       setIsBulkStatusModalOpen(false);
       setSelectedRooms(new Set());
-      loadData();
+      void loadData();
     } catch (error) {
       console.error(error);
     } finally {
@@ -376,7 +376,7 @@ export function Rooms() {
       await Promise.all(Array.from(selectedRooms).map(id => updateRoom(id, { monthly_rent: Number(bulkPrice) })));
       setIsBulkPriceModalOpen(false);
       setSelectedRooms(new Set());
-      loadData();
+      void loadData();
     } catch (error) {
       console.error(error);
     } finally {
@@ -1015,7 +1015,7 @@ export function Rooms() {
 
       {/* Extend Contract Modal */}
       <Modal isOpen={isExtendModalOpen} onClose={() => setIsExtendModalOpen(false)} title="Gia hạn hợp đồng" size="sm">
-        <form onSubmit={(e) => { e.preventDefault(); handleExtendContract(); }} className="p-5 space-y-4">
+        <form onSubmit={(e) => { e.preventDefault(); void handleExtendContract(); }} className="p-5 space-y-4">
           <div className="flex items-center gap-3 p-3 bg-charcoal-50 rounded-xl">
             <PiUserLight className="w-5 h-5 text-charcoal-500" />
             <div>

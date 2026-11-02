@@ -65,7 +65,7 @@ const csvCell = (value) => {
   const text = String(value ?? '');
   // A leading =, +, - or @ would run as a formula when the file is opened in Excel.
   const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
+  return `"${safe.replaceAll('"', '""')}"`;
 };
 
 const validateRoom = ({ room_number, floor, area_sqm, monthly_rent, status, max_occupants }) => {

@@ -128,8 +128,8 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
       setLoading(false);
     }
 
-    loadData();
-    const intervalId = window.setInterval(() => refreshInvoice(false), 3000);
+    void loadData();
+    const intervalId = window.setInterval(() => void refreshInvoice(false), 3000);
     return () => {
       mounted = false;
       window.clearInterval(intervalId);

@@ -52,7 +52,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadStats();
+    void loadStats();
   }, []);
 
   async function loadStats() {

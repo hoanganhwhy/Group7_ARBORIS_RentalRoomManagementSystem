@@ -295,7 +295,7 @@ export function Invoices() {
   if (loading) return <Spinner />;
 
   if (payingInvoice) {
-    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); loadData(); }} />;
+    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); void loadData(); }} />;
   }
 
   return (

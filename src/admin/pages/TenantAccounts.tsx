@@ -35,7 +35,7 @@ export function TenantAccounts() {
 
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   async function loadData() {
@@ -84,7 +84,7 @@ export function TenantAccounts() {
       return;
     }
     const text = `Tài khoản App phòng trọ của bạn là:\n- Đăng nhập: ${tenant.username}\n- Mật khẩu: ${tenant.password}\nVui lòng đổi mật khẩu sau khi đăng nhập lần đầu.`;
-    navigator.clipboard.writeText(text);
+    void navigator.clipboard.writeText(text);
     setCopiedId(tenant.id);
     setTimeout(() => setCopiedId(null), 2000);
   };

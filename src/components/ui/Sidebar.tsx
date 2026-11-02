@@ -30,7 +30,7 @@ export function Sidebar({ currentPage, onNavigate, isOpen = false }: SidebarProp
 
   useEffect(() => {
     if (!user) return;
-    loadBadges();
+    void loadBadges();
     const interval = window.setInterval(loadBadges, 10000);
     return () => window.clearInterval(interval);
   }, [user?.id]);
