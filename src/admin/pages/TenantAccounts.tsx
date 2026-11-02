@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
-import { PiIdentificationBadgeLight, PiUserPlusLight, PiCheckCircleLight, PiEyeLight, PiEyeSlashLight, PiPhoneLight, PiCopyLight, PiArrowsClockwiseLight, PiLockKeyLight, PiTrashLight, PiUserLight, PiKeyLight } from 'react-icons/pi';
+import { PiIdentificationBadgeLight, PiUserPlusLight, PiCheckCircleLight, PiEyeLight, PiEyeSlashLight, PiCopyLight, PiArrowsClockwiseLight, PiLockKeyLight, PiTrashLight, PiUserLight, PiKeyLight } from 'react-icons/pi';
 import { getTenants, getRooms, updateTenant } from '../lib/api';
 import type { Tenant, Room } from '../types';
 import { EmptyState } from '../components/ui/Input';
+
+function generatePassword() {
+  const [value] = crypto.getRandomValues(new Uint32Array(1));
+  return String(100000 + (value % 900000));
+}
 
 export function TenantAccounts() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -30,7 +35,7 @@ export function TenantAccounts() {
 
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   async function loadData() {
@@ -51,21 +56,35 @@ export function TenantAccounts() {
 
   const generateAccount = async (tenant: Tenant) => {
     try {
-      const noAccents = tenant.full_name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const username = noAccents.replace(/\s+/g, '').toLowerCase();
-      const password = Math.floor(100000 + Math.random() * 900000).toString();
-      
+      const noAccents = tenant.full_name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D');
+      const baseUsername = noAccents.replace(/[^A-Za-z0-9]/g, '').toLowerCase() || 'khachthue';
+      const takenUsernames = new Set(tenants.map(t => t.username));
+      let username = baseUsername;
+      for (let suffix = 2; takenUsernames.has(username) || username === 'admin'; suffix += 1) {
+        username = `${baseUsername}${suffix}`;
+      }
+      const password = generatePassword();
+
       const updatedTenant = await updateTenant(tenant.id, { username, password });
-      setTenants(tenants.map(t => t.id === tenant.id ? updatedTenant : t));
+      // The server only stores a hash, so this is the one chance to show the password.
+      setTenants(tenants.map(t => t.id === tenant.id ? { ...updatedTenant, password } : t));
     } catch (error) {
       console.error('Lỗi khi tạo tài khoản:', error);
-      alert('Không thể tạo tài khoản, vui lòng thử lại!');
+      alert(error instanceof Error ? error.message : 'Không thể tạo tài khoản, vui lòng thử lại!');
     }
   };
 
   const copyToZalo = (tenant: Tenant) => {
-    const text = `Tài khoản App phòng trọ của bạn là:\n- Đăng nhập: ${tenant.username}\n- Mật khẩu: ${tenant.password}`;
-    navigator.clipboard.writeText(text);
+    if (!tenant.password) {
+      alert('Hệ thống chỉ lưu mật khẩu đã mã hóa nên không thể xem lại. Hãy dùng "Reset mật khẩu" để tạo mật khẩu mới rồi sao chép.');
+      return;
+    }
+    const text = `Tài khoản App phòng trọ của bạn là:\n- Đăng nhập: ${tenant.username}\n- Mật khẩu: ${tenant.password}\nVui lòng đổi mật khẩu sau khi đăng nhập lần đầu.`;
+    void navigator.clipboard.writeText(text);
     setCopiedId(tenant.id);
     setTimeout(() => setCopiedId(null), 2000);
   };
@@ -76,7 +95,7 @@ export function TenantAccounts() {
     try {
       const updatedTenant = await updateTenant(tenant.id, { username: null, password: null, google_email: null } as any);
       setTenants(tenants.map(t => t.id === tenant.id ? updatedTenant : t));
-    } catch (error) {
+    } catch {
       alert('Lỗi khi thu hồi tài khoản');
     }
   };
@@ -84,11 +103,11 @@ export function TenantAccounts() {
   const handleResetPassword = async (tenant: Tenant) => {
     if (!confirm(`Reset mật khẩu cho ${tenant.full_name}?`)) return;
     try {
-      const password = Math.floor(100000 + Math.random() * 900000).toString();
+      const password = generatePassword();
       const updatedTenant = await updateTenant(tenant.id, { password });
-      setTenants(tenants.map(t => t.id === tenant.id ? updatedTenant : t));
+      setTenants(tenants.map(t => t.id === tenant.id ? { ...updatedTenant, password } : t));
       alert(`Đã reset mật khẩu thành: ${password}`);
-    } catch (error) {
+    } catch {
       alert('Lỗi khi reset mật khẩu');
     }
   };
@@ -97,8 +116,8 @@ export function TenantAccounts() {
     if (!confirm(`Bạn có chắc muốn ${tenant.is_locked ? 'mở khóa' : 'khóa'} tài khoản của ${tenant.full_name}?`)) return;
     try {
       const updatedTenant = await updateTenant(tenant.id, { is_locked: !tenant.is_locked } as any);
-      setTenants(tenants.map(t => t.id === tenant.id ? updatedTenant : t));
-    } catch (error) {
+      setTenants(tenants.map(t => t.id === tenant.id ? { ...updatedTenant, password: tenant.password } : t));
+    } catch {
       alert('Lỗi khi cập nhật trạng thái khóa tài khoản');
     }
   };
@@ -226,9 +245,9 @@ export function TenantAccounts() {
                             <div className="flex items-center gap-2.5 group/pass">
                               <PiKeyLight className="w-4 h-4 text-charcoal-400 shrink-0" />
                               <span className={`font-mono text-charcoal-900 font-medium text-sm tracking-tight w-20`}>
-                                {tenant.password?.startsWith('$2') ? '********' : (visiblePasswords.has(tenant.id) ? (tenant.password || '******') : '••••••')}
+                                {tenant.password && visiblePasswords.has(tenant.id) ? tenant.password : '••••••'}
                               </span>
-                              {!tenant.password?.startsWith('$2') && (
+                              {tenant.password && (
                                 <button 
                                   onClick={() => toggle(setVisiblePasswords, tenant.id)}
                                   className="p-0.5 text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 rounded transition-colors opacity-0 group-hover/pass:opacity-100"
@@ -243,7 +262,7 @@ export function TenantAccounts() {
                         )}
                       </td>
                       <td className="px-4 py-3 align-middle text-right">
-                        <div className="flex justify-end items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                        <div className="flex justify-end items-center gap-1">
                           {hasAccount ? (
                             <>
                               <button 

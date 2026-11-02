@@ -4,7 +4,7 @@
 > Tài liệu này cung cấp cái nhìn tổng quan về kiến trúc phần mềm, ngăn xếp công nghệ (Tech Stack) và chi tiết các quy trình phát triển được áp dụng trong dự án (SDLC, CI/CD, Testing) phục vụ cho việc báo cáo.
 
 ## 1. Tổng quan dự án
-**ARBORIS HostelMate** là một hệ thống phần mềm quản lý phòng trọ toàn diện, được thiết kế để giải quyết bài toán quản lý vận hành khu trọ giữa Chủ nhà (Admin) và Người thuê (Tenant). 
+**ARBORIS** là một hệ thống phần mềm quản lý phòng trọ toàn diện, được thiết kế để giải quyết bài toán quản lý vận hành khu trọ giữa Chủ nhà (Admin) và Người thuê (Tenant). 
 Hệ thống số hóa các quy trình thủ công như: quản lý hợp đồng, tính toán điện nước, lập hóa đơn, theo dõi yêu cầu sửa chữa và đặc biệt là tích hợp Trợ lý ảo AI cùng hệ thống thanh toán tự động VietQR.
 
 ## 2. Kiến trúc & Công nghệ (Tech Stack)

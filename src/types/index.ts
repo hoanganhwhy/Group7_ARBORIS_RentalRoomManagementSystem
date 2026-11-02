@@ -10,6 +10,7 @@ export interface User {
   date_of_birth?: string;
   address?: string;
   is_locked?: boolean;
+  must_change_password?: boolean;
 }
 
 
@@ -101,7 +102,7 @@ export interface Invoice {
   water_cost: number;
   other_fees: number;
   total_amount: number;
-  status: 'pending' | 'paid' | 'overdue' | 'waiting_confirmation';
+  status: 'pending' | 'paid' | 'overdue' | 'waiting_confirmation' | 'review_needed';
   due_date: string | null;
   paid_date: string | null;
   notes: string | null;

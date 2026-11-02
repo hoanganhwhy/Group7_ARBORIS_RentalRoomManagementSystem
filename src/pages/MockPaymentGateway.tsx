@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle2, Copy, Loader2, AlertCircle, Clock, RefreshCw } from 'lucide-react';
 import { Button } from '../components/ui/Button';
-import { getInvoice, getSettings } from '../lib/api';
+import { getInvoice, getSettings, reportPayment } from '../lib/api';
 import { createVietQrSvg } from '../lib/vietqr';
 import type { Invoice } from '../types';
 
@@ -128,8 +128,8 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
       setLoading(false);
     }
 
-    loadData();
-    const intervalId = window.setInterval(() => refreshInvoice(false), 3000);
+    void loadData();
+    const intervalId = window.setInterval(() => void refreshInvoice(false), 3000);
     return () => {
       mounted = false;
       window.clearInterval(intervalId);
@@ -155,7 +155,24 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
     setChecking(false);
   };
 
-  const pageShell = 'fixed inset-y-0 right-0 left-72 bg-white z-50 flex flex-col items-center justify-center p-6 text-center';
+  // Fallback for when the SePay webhook is unavailable: the tenant reports the
+  // transfer and the admin confirms it after checking the bank account.
+  const handleReportPayment = async () => {
+    if (!window.confirm('Xác nhận bạn đã chuyển khoản? Chủ trọ sẽ kiểm tra và xác nhận thanh toán.')) return;
+    setChecking(true);
+    setStatusMessage('');
+    try {
+      await reportPayment(invoiceId);
+      await refreshInvoice(false);
+    } catch (error) {
+      console.error('Failed to report payment:', error);
+      setStatusMessage('Không thể gửi xác nhận lúc này. Vui lòng thử lại.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const pageShell = 'fixed inset-y-0 right-0 left-0 lg:left-72 bg-white z-50 flex flex-col items-center justify-center p-6 text-center';
 
   if (loading) {
     return (
@@ -174,7 +191,7 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
         </div>
         <h2 className="text-3xl font-bold text-charcoal-900 mb-2">Thanh toán thành công!</h2>
         <p className="text-charcoal-600 mb-8 max-w-md text-lg">
-          Hóa đơn {invoice.ma_hoa_don} đã được SePay xác nhận tự động.
+          Hóa đơn {invoice.ma_hoa_don} đã được xác nhận thanh toán.
         </p>
         <Button onClick={onBack} size="lg" className="w-full max-w-sm">Quay lại danh sách hóa đơn</Button>
       </div>
@@ -188,14 +205,14 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
           <Clock className="w-12 h-12 text-yellow-600" />
         </div>
         <h2 className="text-3xl font-bold text-charcoal-900 mb-2">Đang chờ xác nhận</h2>
-        <p className="text-charcoal-600 mb-8 max-w-md text-lg">Hệ thống đang chờ giao dịch tương ứng với mã {paymentContent || invoice.ma_hoa_don}.</p>
+        <p className="text-charcoal-600 mb-8 max-w-md text-lg">Chủ trọ sẽ kiểm tra giao dịch với nội dung {paymentContent || invoice.ma_hoa_don} và xác nhận cho bạn.</p>
         <Button onClick={onBack} size="lg" className="w-full max-w-sm">Quay lại danh sách hóa đơn</Button>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-y-0 right-0 left-72 bg-charcoal-50 z-50 overflow-y-auto">
+    <div className="fixed inset-y-0 right-0 left-0 lg:left-72 bg-charcoal-50 z-50 overflow-y-auto">
       <div className="bg-white sticky top-0 z-10 px-6 py-4 flex items-center gap-3 shadow-sm">
         <button onClick={onBack} className="p-2 rounded-xl hover:bg-charcoal-50 transition-colors" aria-label="Quay lại">
           <ArrowLeft className="w-6 h-6 text-charcoal-700" />
@@ -288,6 +305,10 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
           {checking ? 'Đang kiểm tra...' : 'Kiểm tra trạng thái thanh toán'}
         </Button>
 
+        <Button onClick={handleReportPayment} disabled={checking || !hasQr} variant="secondary" className="w-full mb-4 justify-center" size="lg">
+          Tôi đã chuyển khoản
+        </Button>
+
         {statusMessage && <div className="bg-amber-50 text-amber-800 p-4 rounded-2xl text-sm mb-4 border border-amber-100">{statusMessage}</div>}
 
         <div className="bg-blue-50 text-blue-700 p-5 rounded-2xl text-sm leading-relaxed mb-6 border border-blue-100 shadow-sm">
@@ -296,6 +317,7 @@ export function MockPaymentGateway({ invoiceId, amount, onBack }: { invoiceId: s
             <li>Không sửa số tiền và nội dung chuyển khoản đã điền sẵn.</li>
             <li>Nội dung phải đúng mã <strong>{paymentContent}</strong> để hệ thống nhận diện hóa đơn.</li>
             <li>Sau khi giao dịch vào tài khoản, SePay gửi webhook và màn hình tự cập nhật trong vài giây.</li>
+            <li>Nếu màn hình không tự cập nhật, hãy bấm <strong>Tôi đã chuyển khoản</strong> để chủ trọ xác nhận thủ công.</li>
           </ul>
         </div>
       </div>

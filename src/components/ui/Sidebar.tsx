@@ -10,9 +10,10 @@ import { useSocket } from '../../hooks/useSocket';
 interface SidebarProps {
   currentPage: Page;
   onNavigate: (page: Page) => void;
+  isOpen?: boolean;
 }
 
-export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+export function Sidebar({ currentPage, onNavigate, isOpen = false }: SidebarProps) {
   const { user, logout } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [badges, setBadges] = useState({ invoices: 0, repairs: 0 });
@@ -29,7 +30,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
   useEffect(() => {
     if (!user) return;
-    loadBadges();
+    void loadBadges();
     const interval = window.setInterval(loadBadges, 10000);
     return () => window.clearInterval(interval);
   }, [user?.id]);
@@ -53,7 +54,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
   return (
     <>
-      <aside className="w-72 bg-white border-r border-charcoal-100/50 fixed h-screen flex flex-col z-40 transition-base">
+      <aside className={`w-72 bg-white border-r border-charcoal-100/50 fixed h-screen flex flex-col z-40 transition-transform lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="px-7 py-8 border-b border-charcoal-100/50 flex justify-center">
           <h1 className="text-4xl font-serif text-charcoal-900 tracking-widest uppercase relative inline-block">
             ARBORIS

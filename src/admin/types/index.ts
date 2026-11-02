@@ -27,8 +27,11 @@ export interface Tenant {
   emergency_contact: string | null;
   notes: string | null;
   username?: string | null;
+  // Only present right after the admin sets a password; the API never returns it.
   password?: string | null;
   google_email?: string | null;
+  is_locked?: boolean;
+  must_change_password?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -77,7 +80,7 @@ export interface Invoice {
   water_cost: number;
   other_fees: number;
   total_amount: number;
-  status: 'pending' | 'paid' | 'overdue';
+  status: 'pending' | 'paid' | 'overdue' | 'waiting_confirmation' | 'review_needed';
   due_date: string | null;
   paid_date: string | null;
   notes: string | null;

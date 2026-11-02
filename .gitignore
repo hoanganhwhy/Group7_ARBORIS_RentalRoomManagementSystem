@@ -8,6 +8,15 @@ dist/
 npm
 *.log
 
+# local databases and generated files (contain real data)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+server/uploads/
+
+# downloaded by START_CLOUDFLARED.bat when needed
+cloudflared.exe
+
 # temporary patch scripts
 fix*.cjs
 fix*.py

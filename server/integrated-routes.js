@@ -1,7 +1,9 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { OAuth2Client } from 'google-auth-library';
+import { catchAsync } from './src/utils/catchAsync.js';
 
 const uuid = () => crypto.randomUUID();
 
@@ -17,6 +19,7 @@ const publicUser = (row, role) => ({
   date_of_birth: row.date_of_birth || row.ngay_sinh || '',
   address: row.address || row.dia_chi || '',
   is_locked: !!row.is_locked,
+  must_change_password: role === 'TENANT' && !!row.must_change_password,
 });
 
 const mapTenantRepair = (row) => ({
@@ -53,12 +56,42 @@ const mapTenantRepair = (row) => ({
 
 const verifyPassword = async (plain, stored) => {
   const value = String(stored || '');
-  if (value.startsWith('$2')) return bcrypt.compare(String(plain || ''), value);
-  return String(plain || '') === value;
+  return value.startsWith('$2') && bcrypt.compare(String(plain || ''), value);
 };
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  skipSuccessfulRequests: true,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: 'Bạn đã nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const PASSWORD_TOO_SHORT = 'Mật khẩu mới phải có ít nhất 6 ký tự';
+const SETTINGS_KEYS = new Set(['bank_id', 'bank_account_no', 'bank_account_name', 'vietqr_template', 'payment_prefix', 'allowed_account_numbers', 'landlord_name', 'landlord_phone']);
 
 export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret, googleClientId }) {
   const googleClient = new OAuth2Client(googleClientId || undefined);
+
+  const startSession = (res, payload) => {
+    const token = jwt.sign(payload, jwtSecret, { expiresIn: '7d' });
+    res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 86400000 });
+  };
+
+  const startTenantSession = (res, tenant) => startSession(res, {
+    id: tenant.id,
+    role: 'TENANT',
+    tenant_id: tenant.id,
+    token_version: tenant.token_version || 0,
+  });
+
+  const startAdminSession = (res, admin, role = String(admin.role || 'ADMIN').toUpperCase()) => startSession(res, {
+    id: admin.id,
+    role,
+    token_version: admin.token_version || 0,
+  });
 
   const authenticate = async (req, res, next) => {
     const token = req.cookies?.token || req.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -66,10 +99,11 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
     try {
       const payload = jwt.verify(token, jwtSecret);
       const current = payload.role === 'TENANT'
-        ? await queryOne('SELECT id, username FROM khach_thue WHERE id = ?', [payload.id])
-        : await queryOne('SELECT id, username, token_version FROM users WHERE id = ?', [payload.id]);
+        ? await queryOne('SELECT id, username, is_locked, token_version FROM khach_thue WHERE id = ?', [payload.id])
+        : await queryOne('SELECT id, username, is_locked, token_version FROM users WHERE id = ?', [payload.id]);
       if (!current || !current.username) return res.status(401).json({ error: 'Tài khoản không còn tồn tại hoặc đã bị thu hồi' });
-      if (payload.role !== 'TENANT' && Number(payload.token_version || 0) !== Number(current.token_version || 0)) {
+      if (current.is_locked) return res.status(401).json({ error: 'Tài khoản đã bị khóa. Vui lòng liên hệ chủ trọ.' });
+      if (Number(payload.token_version || 0) !== Number(current.token_version || 0)) {
         return res.status(401).json({ error: 'Phiên đăng nhập đã hết hạn' });
       }
       req.user = payload;
@@ -89,7 +123,15 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
     next();
   };
 
-  app.post('/api/auth/login', async (req, res) => {
+  // Tenants may reach a room they rent now, or a record created for them personally.
+  const canAccessRoom = async (user, roomId, ownerTenantId) => {
+    if (user.role !== 'TENANT') return true;
+    if (ownerTenantId && ownerTenantId === user.id) return true;
+    const assignment = await queryOne('SELECT id FROM hop_dong_thue WHERE phong_id = ? AND khach_thue_id = ? AND dang_hoat_dong = 1', [roomId, user.id]);
+    return Boolean(assignment);
+  };
+
+  app.post('/api/auth/login', loginLimiter, async (req, res) => {
     try {
       const username = String(req.body?.username || '').trim();
       const password = String(req.body?.password || '');
@@ -101,8 +143,7 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
       );
       if (admin && await verifyPassword(password, admin.password_hash)) {
         const role = String(admin.role || 'ADMIN').toUpperCase();
-        const token = jwt.sign({ id: admin.id, role, token_version: admin.token_version || 0 }, jwtSecret, { expiresIn: '7d' });
-        res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 86400000 });
+        startAdminSession(res, admin, role);
         return res.json({ user: publicUser(admin, role), require_password_change: false });
       }
 
@@ -114,9 +155,10 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
         return res.status(401).json({ error: 'Sai tài khoản hoặc mật khẩu' });
       }
 
-      const token = jwt.sign({ id: tenant.id, role: 'TENANT', tenant_id: tenant.id }, jwtSecret, { expiresIn: '7d' });
-      res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 86400000 });
-      res.json({ user: publicUser(tenant, 'TENANT'), require_password_change: false });
+      if (tenant.is_locked) return res.status(403).json({ error: 'Tài khoản đã bị khóa. Vui lòng liên hệ chủ trọ.' });
+
+      startTenantSession(res, tenant);
+      res.json({ user: publicUser(tenant, 'TENANT'), require_password_change: !!tenant.must_change_password });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -136,6 +178,7 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
   app.put('/api/auth/me', authenticate, async (req, res) => {
     try {
       const { full_name, phone, email, cccd, date_of_birth, address, password } = req.body || {};
+      if (password && String(password).length < 6) return res.status(400).json({ error: PASSWORD_TOO_SHORT });
       if (req.user.role === 'TENANT') {
         const existing = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.user.id]);
         if (!existing) return res.status(404).json({ error: 'Không tìm thấy người thuê' });
@@ -143,7 +186,8 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
         if (password) nextPassword = await bcrypt.hash(String(password), 10);
         await run(`
           UPDATE khach_thue
-          SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, password = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+          SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, password = ?,
+              must_change_password = ?, token_version = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
           WHERE id = ?
         `, [
           full_name ?? existing.ho_ten,
@@ -153,9 +197,12 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
           date_of_birth ?? existing.ngay_sinh,
           address ?? existing.dia_chi,
           nextPassword,
+          password ? 0 : existing.must_change_password,
+          Number(existing.token_version || 0) + (password ? 1 : 0),
           req.user.id,
         ]);
         const updated = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.user.id]);
+        startTenantSession(res, updated);
         return res.json({ user: publicUser(updated, 'TENANT') });
       }
 
@@ -165,7 +212,7 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
       if (password) nextPassword = await bcrypt.hash(String(password), 10);
       await run(`
         UPDATE users
-        SET full_name = ?, phone = ?, email = ?, cccd = ?, date_of_birth = ?, address = ?, password_hash = ?, updated_at = CURRENT_TIMESTAMP
+        SET full_name = ?, phone = ?, email = ?, cccd = ?, date_of_birth = ?, address = ?, password_hash = ?, token_version = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `, [
         full_name ?? existing.full_name,
@@ -175,9 +222,11 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
         date_of_birth ?? existing.date_of_birth,
         address ?? existing.address,
         nextPassword,
+        Number(existing.token_version || 0) + (password ? 1 : 0),
         req.user.id,
       ]);
       const updated = await queryOne('SELECT * FROM users WHERE id = ?', [req.user.id]);
+      startAdminSession(res, updated);
       res.json({ user: publicUser(updated, 'ADMIN') });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -192,17 +241,19 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
   app.post('/api/auth/change-password', authenticate, async (req, res) => {
     try {
       const { oldPassword, newPassword } = req.body || {};
-      if (!newPassword || String(newPassword).length < 6) return res.status(400).json({ error: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
+      if (!newPassword || String(newPassword).length < 6) return res.status(400).json({ error: PASSWORD_TOO_SHORT });
       if (req.user.role === 'TENANT') {
-        const row = await queryOne('SELECT password FROM khach_thue WHERE id = ?', [req.user.id]);
+        const row = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.user.id]);
         if (!row || !(await verifyPassword(oldPassword, row.password))) return res.status(400).json({ error: 'Mật khẩu cũ không chính xác' });
         const hashed = await bcrypt.hash(String(newPassword), 10);
-        await run('UPDATE khach_thue SET password = ?, ngay_cap_nhat = CURRENT_TIMESTAMP WHERE id = ?', [hashed, req.user.id]);
+        await run('UPDATE khach_thue SET password = ?, must_change_password = 0, token_version = token_version + 1, ngay_cap_nhat = CURRENT_TIMESTAMP WHERE id = ?', [hashed, req.user.id]);
+        startTenantSession(res, { ...row, token_version: Number(row.token_version || 0) + 1 });
       } else {
-        const row = await queryOne('SELECT password_hash FROM users WHERE id = ?', [req.user.id]);
+        const row = await queryOne('SELECT * FROM users WHERE id = ?', [req.user.id]);
         if (!row || !(await verifyPassword(oldPassword, row.password_hash))) return res.status(400).json({ error: 'Mật khẩu cũ không chính xác' });
         const hashed = await bcrypt.hash(String(newPassword), 10);
         await run('UPDATE users SET password_hash = ?, token_version = token_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [hashed, req.user.id]);
+        startAdminSession(res, { ...row, token_version: Number(row.token_version || 0) + 1 });
       }
       res.json({ success: true });
     } catch (error) {
@@ -218,22 +269,24 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
       const email = payload?.email;
       if (!email) return res.status(401).json({ error: 'Không đọc được email Google' });
       const tenant = await queryOne('SELECT * FROM khach_thue WHERE google_email = ? OR email = ?', [email, email]);
-      if (!tenant) return res.status(403).json({ error: 'Email này chưa được chủ trọ liên kết với tài khoản người thuê' });
-      const token = jwt.sign({ id: tenant.id, role: 'TENANT', tenant_id: tenant.id }, jwtSecret, { expiresIn: '7d' });
-      res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * 86400000 });
+      if (!tenant || !tenant.username) return res.status(403).json({ error: 'Email này chưa được chủ trọ liên kết với tài khoản người thuê' });
+      if (tenant.is_locked) return res.status(403).json({ error: 'Tài khoản đã bị khóa. Vui lòng liên hệ chủ trọ.' });
+      startTenantSession(res, tenant);
       res.json({ user: publicUser(tenant, 'TENANT') });
     } catch {
       res.status(401).json({ error: 'Đăng nhập Google không hợp lệ' });
     }
   });
 
-  app.get('/api/landlord/contact', async (_req, res) => {
+  // Express 4 does not catch a rejected async handler, so without catchAsync a failed
+  // query in the routes below would bring the whole server down.
+  app.get('/api/landlord/contact', catchAsync(async (_req, res) => {
     const rows = await query("SELECT key, value FROM cai_dat WHERE key IN ('landlord_name','landlord_phone')");
     const values = Object.fromEntries(rows.map(r => [r.key, r.value]));
     res.json({ name: values.landlord_name || 'Chủ trọ ARBORIS', phone: values.landlord_phone || '' });
-  });
+  }));
 
-  app.get('/api/admin/users', authenticate, requireAdmin, async (_req, res) => {
+  app.get('/api/admin/users', authenticate, requireAdmin, catchAsync(async (_req, res) => {
     const rows = await query('SELECT id, ho_ten, so_dien_thoai, email, username, google_email, ngay_tao FROM khach_thue ORDER BY ngay_tao DESC');
     const tenants = rows.map((row) => ({
       id: row.id,
@@ -247,15 +300,17 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
       created_at: row.ngay_tao,
     }));
     res.json({ data: tenants, pagination: { page: 1, limit: tenants.length || 1, totalItems: tenants.length, totalPages: 1, hasNextPage: false, hasPreviousPage: false } });
-  });
+  }));
 
   app.post('/api/admin/users', authenticate, requireAdmin, async (req, res) => {
     try {
       const { username, password, full_name, phone, email = '' } = req.body || {};
       if (!username || !password || !full_name) return res.status(400).json({ error: 'Thiếu thông tin tài khoản' });
+      if (String(password).length < 6) return res.status(400).json({ error: PASSWORD_TOO_SHORT });
+      if (await queryOne('SELECT id FROM users WHERE username = ?', [username])) return res.status(400).json({ error: 'Tên đăng nhập hoặc email đã tồn tại' });
       const id = uuid();
-      await run(`INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email, username, password) VALUES (?, ?, ?, ?, ?, ?)`,
-        [id, full_name, phone || '', email, username, password]);
+      await run(`INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email, username, password, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        [id, full_name, phone || '', email, username, await bcrypt.hash(String(password), 10)]);
       res.status(201).json({ id, username, full_name, phone, email, role: 'TENANT' });
     } catch (error) {
       res.status(400).json({ error: error.message.includes('UNIQUE') ? 'Tên đăng nhập hoặc email đã tồn tại' : error.message });
@@ -264,7 +319,7 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
 
   // Proxy the VietQR image through the local backend. This avoids browser/ad-blocker
   // failures when loading img.vietqr.io directly from the tenant portal.
-  app.get('/api/public/vietqr-image', async (req, res) => {
+  app.get('/api/public/vietqr-image', catchAsync(async (req, res) => {
     const amount = Math.round(Number(req.query.amount || 0));
     const content = String(req.query.content || '').trim().toUpperCase();
 
@@ -347,41 +402,44 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
     return res.status(502).json({
       error: 'Không thể kết nối máy chủ ảnh VietQR. Hãy kiểm tra DNS, tường lửa hoặc tiện ích chặn quảng cáo.',
     });
-  });
+  }));
 
-  app.get('/api/settings', authenticate, async (_req, res) => {
+  app.get('/api/settings', authenticate, catchAsync(async (_req, res) => {
     const rows = await query('SELECT key, value FROM cai_dat');
     res.json(Object.fromEntries(rows.map(row => [row.key, row.value])));
-  });
+  }));
 
-  app.put('/api/settings', authenticate, requireAdmin, async (req, res) => {
+  app.put('/api/settings', authenticate, requireAdmin, catchAsync(async (req, res) => {
     for (const [key, value] of Object.entries(req.body || {})) {
+      if (!SETTINGS_KEYS.has(key)) return res.status(400).json({ error: `Không hỗ trợ cấu hình ${key}` });
       await run('INSERT INTO cai_dat (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, String(value ?? '')]);
     }
     res.json({ success: true });
-  });
+  }));
 
   // Notification and direct-message modules were intentionally removed from this build.
 
-  app.get('/api/roommates', authenticate, async (_req, res) => {
+  app.get('/api/roommates', authenticate, catchAsync(async (_req, res) => {
     const rows = await query(`SELECT y.*, p.so_phong, p.dien_tich, p.dieu_hoa, p.may_giat, p.noi_that, p.ban_cong, p.khu_vuc AS dia_chi, k.ho_ten, k.so_dien_thoai
       FROM yeu_cau_o_ghep y JOIN phong p ON p.id=y.phong_id JOIN khach_thue k ON k.id=y.khach_thue_id WHERE y.trang_thai='open' ORDER BY y.ngay_dang DESC`);
     res.json(rows);
-  });
-  app.get('/api/roommates/my-requests', authenticate, async (req, res) => {
+  }));
+  app.get('/api/roommates/my-requests', authenticate, catchAsync(async (req, res) => {
     const rows = await query('SELECT * FROM yeu_cau_o_ghep WHERE khach_thue_id = ? ORDER BY ngay_dang DESC', [req.user.id]);
     res.json(rows);
-  });
-  app.post('/api/roommates', authenticate, async (req, res) => {
+  }));
+  app.post('/api/roommates', authenticate, requireTenant, catchAsync(async (req, res) => {
+    const title = String(req.body?.tieu_de || '').trim();
+    if (!title) return res.status(400).json({ error: 'Vui lòng nhập tiêu đề.' });
     const assignment = await queryOne('SELECT phong_id FROM hop_dong_thue WHERE khach_thue_id=? AND dang_hoat_dong=1 ORDER BY ngay_tao DESC LIMIT 1', [req.user.id]);
     if (!assignment) return res.status(400).json({ error: 'Bạn chưa có phòng đang thuê' });
-    const result = await run('INSERT INTO yeu_cau_o_ghep (khach_thue_id, phong_id, tieu_de, mo_ta, gia_chia_se) VALUES (?, ?, ?, ?, ?)', [req.user.id, assignment.phong_id, req.body?.tieu_de, req.body?.mo_ta || null, Number(req.body?.gia_chia_se || 0)]);
+    const result = await run('INSERT INTO yeu_cau_o_ghep (khach_thue_id, phong_id, tieu_de, mo_ta, gia_chia_se) VALUES (?, ?, ?, ?, ?)', [req.user.id, assignment.phong_id, title, req.body?.mo_ta || null, Number(req.body?.gia_chia_se || 0)]);
     res.status(201).json(await queryOne('SELECT * FROM yeu_cau_o_ghep WHERE id=?', [result.id]));
-  });
-  app.put('/api/roommates/:id/close', authenticate, async (req, res) => {
+  }));
+  app.put('/api/roommates/:id/close', authenticate, catchAsync(async (req, res) => {
     await run("UPDATE yeu_cau_o_ghep SET trang_thai='closed', ngay_cap_nhat=CURRENT_TIMESTAMP WHERE id=? AND khach_thue_id=?", [req.params.id, req.user.id]);
     res.json({ success: true, message: 'Đã đóng yêu cầu' });
-  });
+  }));
 
   // Tenant repair requests use the authenticated account instead of trusting
   // a tenant_id sent from the browser. This keeps the request attached to the
@@ -494,6 +552,20 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
     }
   });
 
+  app.put('/api/tenant/repair_requests/:id/confirm', authenticate, requireTenant, catchAsync(async (req, res) => {
+    const existing = await queryOne(
+      'SELECT trang_thai FROM yeu_cau_sua_chua WHERE id = ? AND khach_thue_id = ?',
+      [req.params.id, req.user.id]
+    );
+    if (!existing) return res.status(404).json({ error: 'Không tìm thấy yêu cầu sửa chữa.' });
+    if (existing.trang_thai !== 'resolved') {
+      return res.status(400).json({ error: 'Chỉ có thể xác nhận yêu cầu đã được xử lý xong.' });
+    }
+    await run("UPDATE yeu_cau_sua_chua SET trang_thai = 'closed', ngay_cap_nhat = CURRENT_TIMESTAMP WHERE id = ?", [req.params.id]);
+    io.emit('repair_updated', { id: req.params.id, tenant_id: req.user.id, status: 'closed', action: 'updated' });
+    res.json({ success: true, status: 'closed' });
+  }));
+
   app.delete('/api/tenant/repair_requests/:id', authenticate, requireTenant, async (req, res) => {
     try {
       const existing = await queryOne(
@@ -513,7 +585,7 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
     }
   });
 
-  app.get('/api/badges', authenticate, async (req, res) => {
+  app.get('/api/badges', authenticate, catchAsync(async (req, res) => {
     let invoices = 0;
     let repairs = 0;
     if (req.user.role === 'TENANT') {
@@ -524,23 +596,26 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
       repairs = (await queryOne("SELECT COUNT(*) AS c FROM yeu_cau_sua_chua WHERE trang_thai IN ('new','in_progress')"))?.c || 0;
     }
     res.json({ chat: 0, notifications: 0, invoices, repairs });
-  });
+  }));
 
-  app.post('/api/invoices/:id/report-payment', authenticate, async (req, res) => {
+  app.post('/api/invoices/:id/report-payment', authenticate, catchAsync(async (req, res) => {
     const invoice = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [req.params.id]);
     if (!invoice) return res.status(404).json({ error: 'Không tìm thấy hóa đơn' });
-    if (req.user.role === 'TENANT' && invoice.khach_thue_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền thao tác hóa đơn này' });
+    if (!(await canAccessRoom(req.user, invoice.phong_id, invoice.khach_thue_id))) return res.status(403).json({ error: 'Không có quyền thao tác hóa đơn này' });
+    if (invoice.trang_thai === 'paid') return res.status(400).json({ error: 'Hóa đơn này đã được thanh toán.' });
     await run("UPDATE hoa_don SET trang_thai='waiting_confirmation', ngay_cap_nhat=CURRENT_TIMESTAMP WHERE id=?", [req.params.id]);
     io.emit('invoice_updated', { id: req.params.id, status: 'waiting_confirmation' });
     res.json({ success: true, status: 'waiting_confirmation' });
-  });
+  }));
 
-  app.patch('/api/admin/invoices/:id/confirm-payment', authenticate, requireAdmin, async (req, res) => {
-    const today = new Date().toISOString().slice(0, 10);
+  app.patch('/api/admin/invoices/:id/confirm-payment', authenticate, requireAdmin, catchAsync(async (req, res) => {
+    const invoice = await queryOne('SELECT id FROM hoa_don WHERE id = ?', [req.params.id]);
+    if (!invoice) return res.status(404).json({ error: 'Không tìm thấy hóa đơn' });
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' });
     await run("UPDATE hoa_don SET trang_thai='paid', ngay_thanh_toan=?, phuong_thuc_thanh_toan=COALESCE(phuong_thuc_thanh_toan,'Xác nhận thủ công'), ngay_cap_nhat=CURRENT_TIMESTAMP WHERE id=?", [today, req.params.id]);
     io.emit('invoice_updated', { id: req.params.id, status: 'paid' });
     res.json({ success: true, status: 'paid' });
-  });
+  }));
 
   const handleSepayWebhook = async (req, res) => {
     try {
@@ -621,13 +696,13 @@ export function setupIntegratedRoutes(app, { query, queryOne, run, io, jwtSecret
   app.post('/api/webhooks/sepay', handleSepayWebhook);
   app.post('/api/payments/webhook', handleSepayWebhook);
 
-  app.get('/api/health', async (_req, res) => {
+  app.get('/api/health', catchAsync(async (_req, res) => {
     const counts = {};
     for (const table of ['phong','khach_thue','hop_dong_thue','hoa_don','yeu_cau_sua_chua']) {
       counts[table] = (await queryOne(`SELECT COUNT(*) AS c FROM ${table}`))?.c || 0;
     }
     res.json({ status: 'ok', database: counts });
-  });
+  }));
 
-  return { authenticate, requireAdmin };
+  return { authenticate, requireAdmin, requireTenant, canAccessRoom };
 }

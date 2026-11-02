@@ -16,6 +16,7 @@ import { ProfileModal } from '../../../components/ui/ProfileModal';
 interface SidebarProps {
   currentPage: Page;
   onNavigate: (page: Page) => void;
+  isOpen?: boolean;
 }
 
 const navItems: { id: Page; label: string; icon: React.ReactNode; description: string }[] = [
@@ -28,13 +29,13 @@ const navItems: { id: Page; label: string; icon: React.ReactNode; description: s
   { id: 'repairs', label: 'Sửa chữa', icon: <PiWrenchLight className="w-5 h-5" />, description: 'Yêu cầu bảo trì' },
 ];
 
-export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+export function Sidebar({ currentPage, onNavigate, isOpen = false }: SidebarProps) {
   const { user, logout } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   return (
     <>
-      <aside className="w-72 bg-white border-r border-charcoal-100/50 fixed h-screen flex flex-col overflow-hidden z-40">
+      <aside className={`w-72 bg-white border-r border-charcoal-100/50 fixed h-screen flex flex-col overflow-hidden z-40 transition-transform lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         {/* Brand Section */}
         <div className="px-7 py-8 border-b border-charcoal-100/50 flex justify-center">
           <h1 className="text-4xl font-serif text-charcoal-900 tracking-widest uppercase relative inline-block">
@@ -44,7 +45,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 min-h-0 px-4 py-4 space-y-1 overflow-hidden">
+        <nav className="flex-1 min-h-0 px-4 py-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {
             const isActive = currentPage === item.id;
             return (

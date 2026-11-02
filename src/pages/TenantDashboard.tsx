@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Phone, ChevronRight, Bell, FileText, Wrench } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import SignatureCanvas from 'react-signature-canvas';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { MockPaymentGateway } from './MockPaymentGateway';
-import { getRepairRequests, changePassword } from '../lib/api';
+import { getMyRepairRequests, changePassword } from '../lib/api';
 import { RoomCard } from '../components/tenant/RoomCard';
 import { FinancialsCard } from '../components/tenant/FinancialsCard';
 import { MaintenanceCard } from '../components/tenant/MaintenanceCard';
@@ -22,9 +22,8 @@ interface TenantDashboardProps {
 }
 
 export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const userFullName = (user as { full_name?: string } | null)?.full_name || user?.username || 'Khách thuê';
-  const [contactInfo, setContactInfo] = useState<{ name: string; phone: string } | null>(null);
   const [portalData, setPortalData] = useState<any>(null);
   const [tenantRepairs, setTenantRepairs] = useState<any[]>([]);
   
@@ -43,22 +42,15 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
   const sigPad = useRef<any>(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/landlord/contact`)
-      .then(res => res.json())
-      .then(data => {
-        if (!data.error) setContactInfo(data);
-      })
-      .catch(err => console.error(err));
-
     if (user?.tenant_id) {
-      loadPortalData();
-      loadRepairSummary();
+      void loadPortalData();
+      void loadRepairSummary();
     }
   }, [user]);
 
   const loadPortalData = async () => {
     try {
-      const res = await fetch(`${API_URL}/tenant/portal?tenant_id=${user?.tenant_id}`);
+      const res = await fetch(`${API_URL}/tenant/portal`, { credentials: 'include' });
       if (res.ok) {
         setPortalData(await res.json());
       }
@@ -69,13 +61,7 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
 
   const loadRepairSummary = async () => {
     try {
-      const result = await getRepairRequests({ limit: 10000 } as any);
-      const rows = result.data || [];
-      const tenantRows = rows.filter(
-        (repair: any) =>
-          String(repair.tenant_id) === String(user?.tenant_id)
-      );
-      setTenantRepairs(tenantRows);
+      setTenantRepairs(await getMyRepairRequests());
     } catch (error) {
       console.error('Failed to load repair summary:', error);
       setTenantRepairs([]);
@@ -92,6 +78,7 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
     setPwdLoading(true);
     try {
       await changePassword(pwdOld, pwdNew);
+      if (user) updateUser({ ...user, must_change_password: false });
       alert('Đổi mật khẩu thành công!');
       setIsChangePasswordOpen(false);
       setPwdOld(''); setPwdNew(''); setPwdConfirm('');
@@ -109,9 +96,10 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
     }
     setSaving(true);
     try {
-      const signatureBase64 = sigPad.current.getTrimmedCanvas().toDataURL('image/png');
+      const signatureBase64 = sigPad.current.getCanvas().toDataURL('image/png');
       const res = await fetch(`${API_URL}/contracts/${signingAssignmentId}/sign`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signatureBase64 })
       });
@@ -119,11 +107,13 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
         alert('Ký hợp đồng thành công!');
         setIsSignModalOpen(false);
         setSigningAssignmentId(null);
-        loadPortalData();
+        void loadPortalData();
       } else {
-        alert('Lỗi khi ký hợp đồng');
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Lỗi khi ký hợp đồng');
       }
-    } catch {
+    } catch (error) {
+      console.error('Failed to sign contract:', error);
       alert('Lỗi hệ thống');
     } finally {
       setSaving(false);
@@ -135,7 +125,7 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
   };
 
   if (payingInvoice) {
-    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); loadPortalData(); loadRepairSummary(); }} />;
+    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); void loadPortalData(); void loadRepairSummary(); }} />;
   }
 
   const rentals: any[] = portalData?.rentals || (portalData?.assignment ? [{
@@ -157,16 +147,16 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
     <div className="space-y-10">
       
       {/* Header */}
-      <header className="flex items-start justify-between">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">
-            Welcome, <span className="italic">{userFullName || user?.username}</span>.
+            Xin chào, <span className="italic">{userFullName || user?.username}</span>.
           </h1>
           <p className="text-charcoal-400 mt-2 text-sm">Xem nhanh hoạt động phòng trọ của bạn</p>
         </div>
         
         <div className="flex items-center gap-4">
-          {user?.tenant_id && (
+          {user?.must_change_password && (
             <button
               onClick={() => setIsChangePasswordOpen(true)}
               className="px-4 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-full text-sm font-medium transition-colors flex items-center gap-2 border border-amber-200"
@@ -197,7 +187,7 @@ export function TenantDashboard({ onNavigate }: TenantDashboardProps = {}) {
       {/* ROOMS GRID */}
       <div>
         <h2 className="text-xl font-serif text-charcoal-900 mb-6 flex items-center gap-2">
-          Your Residences <span className="text-charcoal-300 text-sm font-sans font-normal">({rentals.length})</span>
+          Phòng của bạn <span className="text-charcoal-300 text-sm font-sans font-normal">({rentals.length})</span>
         </h2>
         
         {rentals.length === 0 ? (

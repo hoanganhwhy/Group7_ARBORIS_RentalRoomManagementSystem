@@ -1,31 +1,33 @@
-# Báo cáo kiểm tra bản bàn giao
+# Báo cáo kiểm tra
 
-Ngày kiểm tra: 15/07/2026
+Ngày kiểm tra: 02/11/2026. Môi trường: Windows 11, Node.js 25.4.0.
 
-## Kết quả
+## Kết quả tự động
 
-- `npm run typecheck`: đạt, không có lỗi TypeScript.
-- `npm run build`: đạt, Vite tạo bản production thành công.
-- `npm run lint`: hoàn tất, không có lỗi; còn cảnh báo từ mã giao diện gốc nhưng không chặn build.
-- `npm --prefix server test`: 6/6 bài kiểm thử đạt.
-- `node --check` cho `server.js`, `db.js`, `integrated-routes.js`: đạt.
-- API chạy tại cổng 5000, `/api/health` phản hồi thành công.
-- Đăng nhập Admin mặc định `admin / 123456`: đạt.
-- `/api/settings` trả đúng cấu hình ngân hàng, mẫu VietQR `compact2` và tiền tố `HM`.
-- Database bàn giao: chỉ có một tài khoản Admin; các bảng nghiệp vụ không có dữ liệu mẫu.
-- Kiểm thử webhook trong database bộ nhớ: xác thực API key, đối chiếu tài khoản, khớp hóa đơn, cập nhật đã thanh toán và chống xử lý trùng đều đạt.
+| Lệnh | Kết quả |
+| :--- | :--- |
+| `npm run typecheck` | Đạt, không có lỗi TypeScript |
+| `npm run build` | Đạt |
+| `npm run lint` | 0 lỗi, còn cảnh báo về biến chưa dùng và dependency của hook |
+| `npm test` | 105/105 test đạt (4 bộ test) |
+| `npm run test:coverage` | Độ phủ dòng 85,86%, nhánh 71,11%, hàm 93,29% |
 
-## Phạm vi giao diện
+Bộ test cũng đạt trên Node.js 22 và 24 khi không cài `sqlite3`, tức dùng driver `node:sqlite` có sẵn của Node.
 
-- Admin dùng các component/page gốc từ dự án `Quan Li Phong Tro`.
-- Không còn mục Thông báo hoặc Tin nhắn trong điều hướng Admin/khách thuê.
-- Khách thuê còn ba mục: Tổng quan, Hóa đơn và Sửa chữa.
-- Trang VietQR không còn bị sidebar che và tự kiểm tra trạng thái hóa đơn mỗi 3 giây.
+Độ phủ được đo trên toàn bộ backend, gồm cả `server.js`, `integrated-routes.js`, `contracts.js` và chatbot. Giao diện React chưa có test tự động.
 
-## Kiểm tra bổ sung – Sửa chữa
+## Kiểm tra thủ công trên trình duyệt
 
-- Sidebar Admin không còn `overflow-y-auto`, khung điều hướng không tạo thanh cuộn dọc.
-- Người thuê đăng nhập và tạo yêu cầu qua API có xác thực `/api/tenant/repair_requests`: đạt.
-- API tự gắn đúng người thuê từ cookie đăng nhập và kiểm tra hợp đồng phòng đang hoạt động: đạt.
-- Admin nhận danh sách yêu cầu chung và có thể cập nhật trạng thái xử lý: đạt.
-- Socket.IO phát sự kiện `repair_updated` khi tạo, sửa, xóa hoặc đổi trạng thái: đạt.
+- Tạo phòng, người thuê, hợp đồng, chỉ số điện nước và hóa đơn; các trang Admin đều hiển thị đúng.
+- Cấp tài khoản cho người thuê tên có chữ "Đ"; người thuê bị buộc đổi mật khẩu ở lần đăng nhập đầu.
+- Trang thanh toán tạo được mã VietQR; bấm "Tôi đã chuyển khoản", Admin xác nhận ở mục "Cần xác nhận", hóa đơn chuyển sang đã thanh toán.
+- Ký hợp đồng bằng chữ ký vẽ tay và tải được file PDF.
+- Giao diện ở khổ màn hình 375px: menu dạng ngăn kéo hoạt động, trang không bị tràn ngang.
+- Socket.IO từ chối kết nối không có cookie hợp lệ; CORS không chấp nhận domain lạ; đăng nhập sai lần thứ 21 bị trả về 429.
+- Database định dạng cũ được nâng cấp khi khởi động mà không mất hợp đồng; mật khẩu dạng chữ thường được băm.
+
+## Chưa kiểm tra được
+
+- Webhook SePay với giao dịch thật, do token SePay đã hết hạn. Xử lý webhook chỉ được kiểm tra bằng test tự động với request giả lập; mã webhook không thay đổi trong đợt sửa này.
+- Chatbot với Gemini thật, do không có API key. Luồng gọi công cụ được kiểm tra bằng test với model giả lập.
+- Đăng nhập Google, do chưa cấu hình `GOOGLE_CLIENT_ID`.

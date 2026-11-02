@@ -16,6 +16,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+    }
     throw new Error(errData.error || `HTTP error! status: ${response.status}`);
   }
 

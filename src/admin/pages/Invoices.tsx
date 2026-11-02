@@ -33,7 +33,7 @@ export function Invoices() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [deletingInvoice, setDeletingInvoice] = useState<Invoice | null>(null);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'paid' | 'overdue'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'paid' | 'overdue' | 'needs_review'>('all');
   const [filterMonth, setFilterMonth] = useState<number>(0); // 0 = all
   const [filterYear, setFilterYear] = useState<number>(new Date().getFullYear());
 
@@ -53,7 +53,7 @@ export function Invoices() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    loadData();
+    void loadData();
 
     const handleOpenModal = (e: any) => {
       if (e.detail?.action === 'new-invoice') {
@@ -198,7 +198,7 @@ export function Invoices() {
       setIsModalOpen(false);
     } catch (error) {
       console.error('Failed to save invoice:', error);
-      alert('Không thể lưu hóa đơn. Vui lòng thử lại.');
+      alert(error instanceof Error ? error.message : 'Không thể lưu hóa đơn. Vui lòng thử lại.');
     } finally {
       setSaving(false);
     }
@@ -227,7 +227,9 @@ export function Invoices() {
   }
 
   const filteredInvoices = invoices.filter((invoice) => {
-    const matchesStatus = filter === 'all' || invoice.status === filter;
+    const matchesStatus = filter === 'all'
+      || invoice.status === filter
+      || (filter === 'needs_review' && (invoice.status === 'waiting_confirmation' || invoice.status === 'review_needed'));
     const matchesYear = invoice.invoice_year === filterYear;
     const matchesMonth = filterMonth === 0 || invoice.invoice_month === filterMonth;
     return matchesStatus && matchesYear && matchesMonth;
@@ -238,6 +240,7 @@ export function Invoices() {
     pending: invoices.filter((i) => i.status === 'pending').length,
     paid: invoices.filter((i) => i.status === 'paid').length,
     overdue: invoices.filter((i) => i.status === 'overdue').length,
+    needs_review: invoices.filter((i) => i.status === 'waiting_confirmation' || i.status === 'review_needed').length,
   };
 
   const totalPending = invoices
@@ -265,7 +268,7 @@ export function Invoices() {
       </header>
 
       {/* Financial Summary */}
-      <section className="grid grid-cols-3 gap-6">
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <div className="bg-sage-50 rounded-2xl border border-sage-100 p-6">
           <div className="flex items-start justify-between">
             <div>
@@ -310,7 +313,7 @@ export function Invoices() {
       {/* Filters */}
       <section className="space-y-4">
         <div className="flex gap-2 items-center flex-wrap">
-          {(['all', 'pending', 'paid', 'overdue'] as const).map((status) => (
+          {(['all', 'pending', 'needs_review', 'paid', 'overdue'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilter(status)}
@@ -322,6 +325,7 @@ export function Invoices() {
             >
               {status === 'all' && 'Tất cả'}
               {status === 'pending' && 'Chờ thanh toán'}
+              {status === 'needs_review' && 'Cần xác nhận'}
               {status === 'paid' && 'Đã thanh toán'}
               {status === 'overdue' && 'Quá hạn'}
               <span className={`ml-2 px-2 py-0.5 rounded-lg text-xs ${
@@ -405,10 +409,10 @@ export function Invoices() {
                     <InvoiceStatusBadge status={invoice.status} />
                   </td>
                   <td className="px-4 py-3 align-middle text-right">
-                    <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {invoice.status === 'pending' && (
+                    <div className="flex items-center justify-end gap-1.5 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                      {invoice.status !== 'paid' && (
                         <button onClick={() => handleMarkPaid(invoice)} className="px-3 py-1.5 text-xs font-medium text-sage-600 bg-sage-50 hover:bg-sage-100 rounded-lg border border-sage-200 transition-colors">
-                          Thanh toán
+                          {invoice.status === 'waiting_confirmation' || invoice.status === 'review_needed' ? 'Xác nhận' : 'Thanh toán'}
                         </button>
                       )}
                       <button
@@ -615,6 +619,8 @@ function InvoiceStatusBadge({ status }: { status: string }) {
     pending: 'warning',
     paid: 'success',
     overdue: 'danger',
+    waiting_confirmation: 'warning',
+    review_needed: 'warning',
   };
   return <Badge status={status} variant={variants[status]} />;
 }

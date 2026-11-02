@@ -1,18 +1,16 @@
 import { useEffect, useState } from 'react';
-import { 
-  PiHouseLineLight, 
-  PiUsersLight, 
-  PiCurrencyCircleDollarLight, 
-  PiClockLight, 
-  PiWrenchLight, 
-  PiReceiptLight, 
-  PiTrendUpLight, 
-  PiSparkleLight,
+import {
+  PiHouseLineLight,
+  PiUsersLight,
+  PiCurrencyCircleDollarLight,
+  PiClockLight,
+  PiWrenchLight,
+  PiReceiptLight,
   PiArrowRightLight,
   PiWarningCircleLight,
   PiFileTextLight,
   PiPlusLight,
-  PiUserPlusLight
+  PiUserPlusLight,
 } from 'react-icons/pi';
 import { Badge, Spinner } from '../components/ui/Input';
 import { getDashboardStats } from '../lib/api';
@@ -54,7 +52,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: Page) => void }) 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadStats();
+    void loadStats();
   }, []);
 
   async function loadStats() {

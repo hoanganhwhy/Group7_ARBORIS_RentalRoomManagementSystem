@@ -1,48 +1,103 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import cors from 'cors';
 import crypto from 'crypto';
-import dotenv from 'dotenv';
-import path from 'path';
 import http from 'http';
+import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { Server as SocketIOServer } from 'socket.io';
-import { fileURLToPath } from 'url';
 import { query, queryOne, run, dbReady } from './db.js';
 import { setupContracts } from './contracts.js';
 import aiRoutes from './src/routes/ai.routes.js';
 import { setupIntegratedRoutes } from './integrated-routes.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.join(__dirname, '..', '.env') });
+import { JWT_SECRET, corsOptions } from './src/config.js';
+import { errorHandler } from './src/middleware/errorHandler.js';
 
 const app = express();
 const httpServer = http.createServer(app);
-const io = new SocketIOServer(httpServer, { cors: { origin: true, credentials: true } });
+const io = new SocketIOServer(httpServer, { cors: corsOptions });
 const port = Number(process.env.PORT || 5000);
-const JWT_SECRET = process.env.JWT_SECRET || 'arboris-local-development-secret';
 
 app.set('trust proxy', 1);
 app.set('io', io);
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 15000, standardHeaders: true, legacyHeaders: false }));
 app.use('/api/ai', aiRoutes);
 
-io.on('connection', (socket) => {
-  socket.on('join', ({ userId, role } = {}) => {
-    if (userId) socket.join(`user:${userId}`);
-    if (role) socket.join(`role:${String(role).toUpperCase()}`);
-  });
+// Realtime updates are only for signed-in users; the token comes from the login cookie.
+io.use((socket, next) => {
+  const token = /(?:^|;\s*)token=([^;]+)/.exec(socket.handshake.headers.cookie || '')?.[1];
+  try {
+    socket.data.user = jwt.verify(decodeURIComponent(token || ''), JWT_SECRET);
+    next();
+  } catch {
+    next(new Error('Unauthorized'));
+  }
 });
+
+const duplicateAccountMessage = 'Tên đăng nhập hoặc email Google đã được sử dụng.';
+
+const validateTenantAccount = async (username, password) => {
+  if (password && String(password).length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự.';
+  if (username) {
+    const admin = await queryOne('SELECT id FROM users WHERE username = ?', [String(username).trim()]);
+    if (admin) return duplicateAccountMessage;
+  }
+  return null;
+};
 
 // Helper function to generate UUID
 const generateId = () => crypto.randomUUID();
 const PAYMENT_PREFIX = String(process.env.PAYMENT_PREFIX || 'HM').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'HM';
+const ROOM_STATUSES = new Set(['available', 'occupied', 'maintenance']);
+const INVOICE_STATUSES = new Set(['pending', 'paid', 'overdue', 'waiting_confirmation', 'review_needed']);
+const PRIORITIES = new Set(['low', 'medium', 'high', 'urgent']);
+const REPAIR_STATUSES = new Set(['new', 'in_progress', 'resolved', 'closed']);
 
-setupIntegratedRoutes(app, {
+const isNonNegativeNumber = (value) => value !== '' && value !== null && Number.isFinite(Number(value)) && Number(value) >= 0;
+const isValidDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value)) && !Number.isNaN(Date.parse(value));
+const blankToNull = (value) => (value === undefined ? undefined : (String(value ?? '').trim() || null));
+const todayInVietnam = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' });
+const csvCell = (value) => {
+  const text = String(value ?? '');
+  // A leading =, +, - or @ would run as a formula when the file is opened in Excel.
+  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safe.replaceAll('"', '""')}"`;
+};
+
+const validateRoom = ({ room_number, floor, area_sqm, monthly_rent, status, max_occupants }) => {
+  if (room_number !== undefined && !String(room_number).trim()) return 'Vui lòng nhập mã phòng.';
+  if (floor !== undefined && !(Number.isInteger(Number(floor)) && Number(floor) >= 0)) return 'Tầng không hợp lệ.';
+  if (area_sqm !== undefined && !isNonNegativeNumber(area_sqm)) return 'Diện tích không hợp lệ.';
+  if (monthly_rent !== undefined && !isNonNegativeNumber(monthly_rent)) return 'Giá phòng không hợp lệ.';
+  if (status !== undefined && !ROOM_STATUSES.has(status)) return 'Trạng thái phòng không hợp lệ.';
+  if (max_occupants !== undefined && !(Number.isInteger(Number(max_occupants)) && Number(max_occupants) >= 1)) return 'Số người tối đa phải từ 1 trở lên.';
+  return null;
+};
+
+const validateInvoice = ({ invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, status }) => {
+  if (!(Number.isInteger(Number(invoice_month)) && Number(invoice_month) >= 1 && Number(invoice_month) <= 12)) return 'Tháng hóa đơn không hợp lệ.';
+  if (!(Number.isInteger(Number(invoice_year)) && Number(invoice_year) >= 2000)) return 'Năm hóa đơn không hợp lệ.';
+  if (![room_rent, electricity_cost, water_cost, other_fees].every(isNonNegativeNumber)) return 'Các khoản tiền phải là số không âm.';
+  if (!INVOICE_STATUSES.has(status)) return 'Trạng thái hóa đơn không hợp lệ.';
+  return null;
+};
+
+const invoiceTotal = (rent, electricity, water, other) => Number(rent) + Number(electricity) + Number(water) + Number(other);
+
+const duplicateInvoiceMessage = 'Phòng này đã có hóa đơn cho tháng được chọn.';
+
+const validateReadings = (electricityOld, electricityNew, waterOld, waterNew) => {
+  if (![electricityOld, electricityNew, waterOld, waterNew].every(isNonNegativeNumber)) return 'Các chỉ số điện nước không được là số âm.';
+  if (Number(electricityNew) < Number(electricityOld)) return 'Chỉ số điện mới không được nhỏ hơn chỉ số cũ.';
+  if (Number(waterNew) < Number(waterOld)) return 'Chỉ số nước mới không được nhỏ hơn chỉ số cũ.';
+  return null;
+};
+
+const { authenticate, requireAdmin, requireTenant, canAccessRoom } = setupIntegratedRoutes(app, {
   query,
   queryOne,
   run,
@@ -50,6 +105,7 @@ setupIntegratedRoutes(app, {
   jwtSecret: JWT_SECRET,
   googleClientId: process.env.GOOGLE_CLIENT_ID,
 });
+const adminOnly = [authenticate, requireAdmin];
 
 // ----------------- SCHEMA MAPPERS (Vietnamese DB -> English API) -----------------
 const mapRoom = (r) => {
@@ -82,9 +138,9 @@ const mapTenant = (t) => {
     emergency_contact: t.lien_he_khan_cap,
     notes: t.ghi_chu,
     username: t.username,
-    password: t.password,
     google_email: t.google_email,
     is_locked: !!t.is_locked,
+    must_change_password: !!t.must_change_password,
     created_at: t.ngay_tao,
     updated_at: t.ngay_cap_nhat
   };
@@ -169,10 +225,10 @@ const mapRepair = (rep) => {
 };
 
 // ----------------- ROOMS API -----------------
-app.get('/api/rooms', async (req, res) => {
+app.get('/api/rooms', adminOnly, async (req, res) => {
   try {
     const rooms = await query('SELECT * FROM phong ORDER BY so_phong');
-    
+
     // Fetch all active assignments for mapping
     const assignments = await query(`
       SELECT ra.*, t.ho_ten, t.so_dien_thoai, t.email, t.so_cccd, t.ngay_sinh, t.dia_chi, t.lien_he_khan_cap, t.ghi_chu as ghi_chu_khach
@@ -231,7 +287,7 @@ app.get('/api/rooms', async (req, res) => {
   }
 });
 
-app.get('/api/rooms/:id', async (req, res) => {
+app.get('/api/rooms/:id', adminOnly, async (req, res) => {
   try {
     const room = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
     if (!room) {
@@ -283,11 +339,13 @@ app.get('/api/rooms/:id', async (req, res) => {
   }
 });
 
-app.post('/api/rooms', async (req, res) => {
+app.post('/api/rooms', adminOnly, async (req, res) => {
   try {
     const id = generateId();
-    const { room_number, floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2, location = 'Cơ sở chính' } = req.body;
-    
+    const { room_number = '', floor = 1, area_sqm = 0, monthly_rent = 0, status = 'available', description = '', max_occupants = 2, location = 'Cơ sở chính' } = req.body;
+    const invalid = validateRoom({ room_number, floor, area_sqm, monthly_rent, status, max_occupants });
+    if (invalid) return res.status(400).json({ error: invalid });
+
     await run(`
       INSERT INTO phong (id, so_phong, tang, dien_tich, gia_phong, trang_thai, mo_ta, so_nguoi_toi_da, khu_vuc)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -303,13 +361,24 @@ app.post('/api/rooms', async (req, res) => {
   }
 });
 
-app.put('/api/rooms/:id', async (req, res) => {
+app.put('/api/rooms/:id', adminOnly, async (req, res) => {
   try {
     const { room_number, floor, area_sqm, monthly_rent, status, description, max_occupants, location } = req.body;
-    
+
     const existing = await queryOne('SELECT * FROM phong WHERE id = ?', [req.params.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Room not found' });
+    }
+
+    const invalid = validateRoom(req.body);
+    if (invalid) return res.status(400).json({ error: invalid });
+
+    const occupants = (await queryOne('SELECT COUNT(*) AS c FROM hop_dong_thue WHERE phong_id = ? AND dang_hoat_dong = 1', [req.params.id]))?.c || 0;
+    if (max_occupants !== undefined && Number(max_occupants) < occupants) {
+      return res.status(400).json({ error: `Phòng đang có ${occupants} người ở, không thể giảm số người tối đa xuống ${max_occupants}.` });
+    }
+    if (status === 'available' && occupants > 0) {
+      return res.status(400).json({ error: 'Phòng đang có người ở nên không thể chuyển sang trạng thái trống.' });
     }
 
     const updated = {
@@ -339,11 +408,15 @@ app.put('/api/rooms/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/rooms/:id', async (req, res) => {
+app.delete('/api/rooms/:id', adminOnly, async (req, res) => {
   try {
     const activeAssign = await queryOne('SELECT id FROM hop_dong_thue WHERE phong_id = ? AND dang_hoat_dong = 1', [req.params.id]);
     if (activeAssign) {
       return res.status(400).json({ error: 'Không thể xóa phòng đang có người thuê. Vui lòng thanh lý hợp đồng trước.' });
+    }
+    const unpaidInvoice = await queryOne(`SELECT id FROM hoa_don WHERE phong_id = ? AND trang_thai <> 'paid'`, [req.params.id]);
+    if (unpaidInvoice) {
+      return res.status(400).json({ error: 'Không thể xóa phòng còn hóa đơn chưa thanh toán.' });
     }
     await run('DELETE FROM phong WHERE id = ?', [req.params.id]);
     res.status(204).end();
@@ -354,7 +427,7 @@ app.delete('/api/rooms/:id', async (req, res) => {
 
 
 // ----------------- TENANTS API -----------------
-app.get('/api/tenants', async (req, res) => {
+app.get('/api/tenants', adminOnly, async (req, res) => {
   try {
     const tenants = await query('SELECT * FROM khach_thue ORDER BY ho_ten');
     res.json(tenants.map(mapTenant));
@@ -363,7 +436,7 @@ app.get('/api/tenants', async (req, res) => {
   }
 });
 
-app.get('/api/tenants/:id', async (req, res) => {
+app.get('/api/tenants/:id', adminOnly, async (req, res) => {
   try {
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
     if (!tenant) {
@@ -375,28 +448,43 @@ app.get('/api/tenants/:id', async (req, res) => {
   }
 });
 
-app.post('/api/tenants', async (req, res) => {
+app.post('/api/tenants', adminOnly, async (req, res) => {
   try {
     const id = generateId();
     const { full_name, phone = '', email = '', id_card_number = '', date_of_birth = '', address = '', emergency_contact = '', notes = '', username = null, password = null, google_email = null } = req.body;
-    
+    if (!String(full_name || '').trim()) return res.status(400).json({ error: 'Vui lòng nhập họ tên người thuê.' });
+
+    const accountError = await validateTenantAccount(username, password);
+    if (accountError) return res.status(400).json({ error: accountError });
+    const hashedPassword = password ? await bcrypt.hash(String(password), 10) : null;
+
     await run(`
-      INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email, so_cccd, ngay_sinh, dia_chi, lien_he_khan_cap, ghi_chu, username, password, google_email)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [id, full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes, username, password, google_email]);
+      INSERT INTO khach_thue (id, ho_ten, so_dien_thoai, email, so_cccd, ngay_sinh, dia_chi, lien_he_khan_cap, ghi_chu, username, password, google_email, must_change_password)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [id, full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes, blankToNull(username), hashedPassword, blankToNull(google_email), hashedPassword ? 1 : 0]);
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [id]);
     res.status(201).json(mapTenant(tenant));
   } catch (error) {
+    if (error.message?.includes('UNIQUE constraint failed')) return res.status(400).json({ error: duplicateAccountMessage });
     res.status(500).json({ error: error.message });
   }
 });
 
-app.put('/api/tenants/:id', async (req, res) => {
+app.put('/api/tenants/:id', adminOnly, async (req, res) => {
   try {
     const { full_name, phone, email, id_card_number, date_of_birth, address, emergency_contact, notes, username, password, google_email } = req.body;
     const existing = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Tenant not found' });
+    if (full_name !== undefined && !String(full_name).trim()) return res.status(400).json({ error: 'Vui lòng nhập họ tên người thuê.' });
+
+    const accountError = await validateTenantAccount(username, password);
+    if (accountError) return res.status(400).json({ error: accountError });
+
+    const nextLocked = req.body.is_locked !== undefined ? (req.body.is_locked ? 1 : 0) : existing.is_locked;
+    const accountRevoked = username === null || username === '';
+    // A new password or a lock ends the sessions the tenant already has open.
+    const sessionsChanged = Boolean(password) || accountRevoked || (nextLocked && !existing.is_locked);
 
     const updated = {
       ho_ten: full_name !== undefined ? full_name : existing.ho_ten,
@@ -407,26 +495,29 @@ app.put('/api/tenants/:id', async (req, res) => {
       dia_chi: address !== undefined ? address : existing.dia_chi,
       lien_he_khan_cap: emergency_contact !== undefined ? emergency_contact : existing.lien_he_khan_cap,
       ghi_chu: notes !== undefined ? notes : existing.ghi_chu,
-      username: username !== undefined ? username : existing.username,
-      password: password !== undefined ? password : existing.password,
-      google_email: google_email !== undefined ? google_email : existing.google_email,
-      is_locked: req.body.is_locked !== undefined ? (req.body.is_locked ? 1 : 0) : existing.is_locked,
+      username: username !== undefined ? blankToNull(username) : existing.username,
+      password: accountRevoked ? null : (password ? await bcrypt.hash(String(password), 10) : existing.password),
+      google_email: google_email !== undefined ? blankToNull(google_email) : existing.google_email,
+      is_locked: nextLocked,
+      must_change_password: password ? 1 : (accountRevoked ? 0 : existing.must_change_password),
+      token_version: Number(existing.token_version || 0) + (sessionsChanged ? 1 : 0),
     };
 
     await run(`
       UPDATE khach_thue 
-      SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, lien_he_khan_cap = ?, ghi_chu = ?, username = ?, password = ?, google_email = ?, is_locked = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
+      SET ho_ten = ?, so_dien_thoai = ?, email = ?, so_cccd = ?, ngay_sinh = ?, dia_chi = ?, lien_he_khan_cap = ?, ghi_chu = ?, username = ?, password = ?, google_email = ?, is_locked = ?, must_change_password = ?, token_version = ?, ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
-    `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, updated.lien_he_khan_cap, updated.ghi_chu, updated.username, updated.password, updated.google_email, updated.is_locked, req.params.id]);
+    `, [updated.ho_ten, updated.so_dien_thoai, updated.email, updated.so_cccd, updated.ngay_sinh, updated.dia_chi, updated.lien_he_khan_cap, updated.ghi_chu, updated.username, updated.password, updated.google_email, updated.is_locked, updated.must_change_password, updated.token_version, req.params.id]);
 
     const tenant = await queryOne('SELECT * FROM khach_thue WHERE id = ?', [req.params.id]);
     res.json(mapTenant(tenant));
   } catch (error) {
+    if (error.message?.includes('UNIQUE constraint failed')) return res.status(400).json({ error: duplicateAccountMessage });
     res.status(500).json({ error: error.message });
   }
 });
 
-app.delete('/api/tenants/:id', async (req, res) => {
+app.delete('/api/tenants/:id', adminOnly, async (req, res) => {
   try {
     const activeAssign = await queryOne('SELECT id FROM hop_dong_thue WHERE khach_thue_id = ? AND dang_hoat_dong = 1', [req.params.id]);
     if (activeAssign) {
@@ -445,9 +536,18 @@ app.delete('/api/tenants/:id', async (req, res) => {
 
 
 // ----------------- ROOM ASSIGNMENTS API -----------------
-app.post('/api/room_assignments', async (req, res) => {
+app.post('/api/room_assignments', adminOnly, async (req, res) => {
   try {
-    const { room_id, tenant_id, start_date, deposit_amount, is_primary, notes, contract_end_date } = req.body;
+    const { room_id, tenant_id, start_date, deposit_amount = 0, is_primary, notes, contract_end_date } = req.body;
+    if (!room_id || !tenant_id) return res.status(400).json({ error: 'Vui lòng chọn phòng và người thuê.' });
+    if (!isValidDate(start_date)) return res.status(400).json({ error: 'Ngày bắt đầu không hợp lệ.' });
+    if (contract_end_date && (!isValidDate(contract_end_date) || contract_end_date < start_date)) {
+      return res.status(400).json({ error: 'Ngày hết hạn hợp đồng phải sau ngày bắt đầu.' });
+    }
+    if (!isNonNegativeNumber(deposit_amount)) return res.status(400).json({ error: 'Tiền đặt cọc không hợp lệ.' });
+
+    const tenantExists = await queryOne('SELECT id FROM khach_thue WHERE id = ?', [tenant_id]);
+    if (!tenantExists) return res.status(404).json({ error: 'Tenant not found' });
 
     // Check room status & capacity
     const room = await queryOne('SELECT id, trang_thai, so_nguoi_toi_da FROM phong WHERE id = ?', [room_id]);
@@ -524,10 +624,12 @@ app.post('/api/room_assignments', async (req, res) => {
   }
 });
 
-app.put('/api/room_assignments/:id/primary', async (req, res) => {
+app.put('/api/room_assignments/:id/primary', adminOnly, async (req, res) => {
   try {
     const { room_id } = req.body;
     if (!room_id) return res.status(400).json({ error: 'room_id is required' });
+    const target = await queryOne('SELECT id FROM hop_dong_thue WHERE id = ? AND phong_id = ? AND dang_hoat_dong = 1', [req.params.id, room_id]);
+    if (!target) return res.status(404).json({ error: 'Assignment not found' });
 
     // Unset all primary in room first
     await run('UPDATE hop_dong_thue SET la_nguoi_dai_dien = 0 WHERE phong_id = ? AND dang_hoat_dong = 1', [room_id]);
@@ -540,18 +642,19 @@ app.put('/api/room_assignments/:id/primary', async (req, res) => {
   }
 });
 
-app.post('/api/room_assignments/:id/end', async (req, res) => {
+app.post('/api/room_assignments/:id/end', adminOnly, async (req, res) => {
   try {
-    const assignment = await queryOne('SELECT phong_id, la_nguoi_dai_dien FROM hop_dong_thue WHERE id = ?', [req.params.id]);
+    const assignment = await queryOne('SELECT phong_id, la_nguoi_dai_dien, dang_hoat_dong FROM hop_dong_thue WHERE id = ?', [req.params.id]);
     if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+    if (!assignment.dang_hoat_dong) return res.status(400).json({ error: 'Hợp đồng này đã kết thúc.' });
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = todayInVietnam();
     await run('UPDATE hop_dong_thue SET dang_hoat_dong = 0, ngay_ket_thuc = ? WHERE id = ?', [todayStr, req.params.id]);
 
     // Check if there are any remaining active assignments in the room
     const remaining = await query('SELECT id FROM hop_dong_thue WHERE phong_id = ? AND dang_hoat_dong = 1 ORDER BY ngay_bat_dau ASC', [assignment.phong_id]);
     if (remaining.length === 0) {
-      await run("UPDATE phong SET trang_thai = 'available' WHERE id = ?", [assignment.phong_id]);
+      await run("UPDATE phong SET trang_thai = 'available' WHERE id = ? AND trang_thai = 'occupied'", [assignment.phong_id]);
     } else if (assignment.la_nguoi_dai_dien === 1) {
       // If the primary tenant checked out, promote the oldest remaining tenant
       await run('UPDATE hop_dong_thue SET la_nguoi_dai_dien = 1 WHERE id = ?', [remaining[0].id]);
@@ -563,10 +666,16 @@ app.post('/api/room_assignments/:id/end', async (req, res) => {
   }
 });
 
-app.put('/api/room_assignments/:id/extend', async (req, res) => {
+app.put('/api/room_assignments/:id/extend', adminOnly, async (req, res) => {
   try {
     const { contract_end_date } = req.body;
-    await run('UPDATE hop_dong_thue SET ngay_het_han_hop_dong = ? WHERE id = ?', [contract_end_date, req.params.id]);
+    if (!isValidDate(contract_end_date)) return res.status(400).json({ error: 'Ngày hết hạn hợp đồng không hợp lệ.' });
+    const existing = await queryOne('SELECT ngay_bat_dau, dang_hoat_dong FROM hop_dong_thue WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Assignment not found' });
+    if (!existing.dang_hoat_dong) return res.status(400).json({ error: 'Hợp đồng này đã kết thúc.' });
+    if (contract_end_date < existing.ngay_bat_dau) return res.status(400).json({ error: 'Ngày hết hạn hợp đồng phải sau ngày bắt đầu.' });
+    // Clearing the stored file makes the next download regenerate the PDF with the new date.
+    await run('UPDATE hop_dong_thue SET ngay_het_han_hop_dong = ?, file_hop_dong = NULL, ngay_cap_nhat = CURRENT_TIMESTAMP WHERE id = ?', [contract_end_date, req.params.id]);
     const updated = await queryOne('SELECT * FROM hop_dong_thue WHERE id = ?', [req.params.id]);
     res.json(mapAssignment(updated));
   } catch (error) {
@@ -574,7 +683,7 @@ app.put('/api/room_assignments/:id/extend', async (req, res) => {
   }
 });
 
-app.get('/api/room_assignments/expiring', async (req, res) => {
+app.get('/api/room_assignments/expiring', adminOnly, async (req, res) => {
   try {
     const withinDays = parseInt(req.query.withinDays || '30', 10);
     const today = new Date();
@@ -631,7 +740,7 @@ app.get('/api/room_assignments/expiring', async (req, res) => {
 
 
 // ----------------- METER READINGS API -----------------
-app.get('/api/meter_readings', async (req, res) => {
+app.get('/api/meter_readings', adminOnly, async (req, res) => {
   try {
     const data = await query(`
       SELECT mr.*, r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da
@@ -660,7 +769,7 @@ app.get('/api/meter_readings', async (req, res) => {
   }
 });
 
-app.get('/api/meter_readings/room/:roomId', async (req, res) => {
+app.get('/api/meter_readings/room/:roomId', adminOnly, async (req, res) => {
   try {
     const data = await query('SELECT * FROM chi_so_dien_nuoc WHERE phong_id = ? ORDER BY ngay_ghi_so DESC', [req.params.roomId]);
     res.json(data.map(mapReading));
@@ -669,7 +778,7 @@ app.get('/api/meter_readings/room/:roomId', async (req, res) => {
   }
 });
 
-app.get('/api/meter_readings/latest/:roomId', async (req, res) => {
+app.get('/api/meter_readings/latest/:roomId', adminOnly, async (req, res) => {
   try {
     const row = await queryOne('SELECT * FROM chi_so_dien_nuoc WHERE phong_id = ? ORDER BY ngay_ghi_so DESC LIMIT 1', [req.params.roomId]);
     res.json(mapReading(row));
@@ -678,7 +787,7 @@ app.get('/api/meter_readings/latest/:roomId', async (req, res) => {
   }
 });
 
-app.post('/api/meter_readings', async (req, res) => {
+app.post('/api/meter_readings', adminOnly, async (req, res) => {
   try {
     const id = generateId();
     const { room_id, reading_date, electricity_old, electricity_new, water_old, water_new, electricity_price_per_unit = 3500, water_price_per_unit = 15000 } = req.body;
@@ -691,20 +800,17 @@ app.post('/api/meter_readings', async (req, res) => {
       return res.status(400).json({ error: 'Các trường chỉ số điện nước không được để trống.' });
     }
 
-    if (Number(electricity_old) < 0 || Number(electricity_new) < 0 || Number(water_old) < 0 || Number(water_new) < 0) {
-      return res.status(400).json({ error: 'Các chỉ số điện nước không được là số âm.' });
+    if (!isValidDate(reading_date)) return res.status(400).json({ error: 'Ngày ghi số không hợp lệ.' });
+    const invalid = validateReadings(electricity_old, electricity_new, water_old, water_new);
+    if (invalid) return res.status(400).json({ error: invalid });
+    if (!isNonNegativeNumber(electricity_price_per_unit) || !isNonNegativeNumber(water_price_per_unit)) {
+      return res.status(400).json({ error: 'Đơn giá điện nước không hợp lệ.' });
     }
-    
+
     const monthPrefix = reading_date.substring(0, 7);
     const existingReading = await queryOne(`SELECT id FROM chi_so_dien_nuoc WHERE phong_id = ? AND ngay_ghi_so LIKE ?`, [room_id, `${monthPrefix}%`]);
     if (existingReading) {
       return res.status(400).json({ error: `Phòng này đã được chốt chỉ số điện nước trong tháng ${monthPrefix.split('-').reverse().join('/')}.` });
-    }
-    if (Number(electricity_new) < Number(electricity_old)) {
-      return res.status(400).json({ error: 'Chỉ số điện mới không được nhỏ hơn chỉ số cũ.' });
-    }
-    if (Number(water_new) < Number(water_old)) {
-      return res.status(400).json({ error: 'Chỉ số nước mới không được nhỏ hơn chỉ số cũ.' });
     }
 
     await run(`
@@ -719,7 +825,7 @@ app.post('/api/meter_readings', async (req, res) => {
   }
 });
 
-app.put('/api/meter_readings/:id', async (req, res) => {
+app.put('/api/meter_readings/:id', adminOnly, async (req, res) => {
   try {
     const { room_id, reading_date, electricity_old, electricity_new, water_old, water_new, electricity_price_per_unit, water_price_per_unit } = req.body;
     const existing = await queryOne('SELECT * FROM chi_so_dien_nuoc WHERE id = ?', [req.params.id]);
@@ -744,11 +850,14 @@ app.put('/api/meter_readings/:id', async (req, res) => {
       return res.status(400).json({ error: 'Các trường chỉ số điện nước không được để trống.' });
     }
 
-    if (Number(updated.so_dien_moi) < Number(updated.so_dien_cu)) {
-      return res.status(400).json({ error: 'Chỉ số điện mới không được nhỏ hơn chỉ số cũ.' });
-    }
-    if (Number(updated.so_nuoc_moi) < Number(updated.so_nuoc_cu)) {
-      return res.status(400).json({ error: 'Chỉ số nước mới không được nhỏ hơn chỉ số cũ.' });
+    if (!isValidDate(updated.ngay_ghi_so)) return res.status(400).json({ error: 'Ngày ghi số không hợp lệ.' });
+    const invalid = validateReadings(updated.so_dien_cu, updated.so_dien_moi, updated.so_nuoc_cu, updated.so_nuoc_moi);
+    if (invalid) return res.status(400).json({ error: invalid });
+
+    const monthPrefix = String(updated.ngay_ghi_so).substring(0, 7);
+    const sameMonth = await queryOne('SELECT id FROM chi_so_dien_nuoc WHERE phong_id = ? AND ngay_ghi_so LIKE ? AND id <> ?', [updated.phong_id, `${monthPrefix}%`, req.params.id]);
+    if (sameMonth) {
+      return res.status(400).json({ error: `Phòng này đã được chốt chỉ số điện nước trong tháng ${monthPrefix.split('-').reverse().join('/')}.` });
     }
 
     await run(`
@@ -764,7 +873,7 @@ app.put('/api/meter_readings/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/meter_readings/:id', async (req, res) => {
+app.delete('/api/meter_readings/:id', adminOnly, async (req, res) => {
   try {
     await run('DELETE FROM chi_so_dien_nuoc WHERE id = ?', [req.params.id]);
     res.status(204).end();
@@ -775,9 +884,10 @@ app.delete('/api/meter_readings/:id', async (req, res) => {
 
 
 // ----------------- INVOICES API -----------------
-app.get('/api/invoices', async (req, res) => {
+app.get('/api/invoices', authenticate, async (req, res) => {
   try {
-    const tenantId = req.query.tenant_id ? String(req.query.tenant_id) : null;
+    // A tenant only ever sees their own invoices, whatever the query string says.
+    const tenantId = req.user.role === 'TENANT' ? req.user.id : (req.query.tenant_id ? String(req.query.tenant_id) : null);
     const data = await query(`
       SELECT i.*, 
              r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
@@ -833,7 +943,7 @@ app.get('/api/invoices', async (req, res) => {
   }
 });
 
-app.get('/api/invoices/export', async (req, res) => {
+app.get('/api/invoices/export', adminOnly, async (req, res) => {
   try {
     const data = await query(`
       SELECT i.*, r.so_phong, t.ho_ten
@@ -844,10 +954,10 @@ app.get('/api/invoices/export', async (req, res) => {
     `);
 
     let csvContent = 'Mã hóa đơn,Số phòng,Khách thuê,Tháng,Năm,Tiền phòng,Tiền điện,Tiền nước,Phí khác,Tổng cộng,Trạng thái,Hạn thanh toán\n';
-    
+
     data.forEach(item => {
       const statusText = item.trang_thai === 'paid' ? 'Đã thanh toán' : (item.trang_thai === 'overdue' ? 'Quá hạn' : 'Chưa thanh toán');
-      csvContent += `${item.id},${item.so_phong || ''},${item.ho_ten || ''},${item.thang_hoa_don},${item.nam_hoa_don},${item.tien_phong || 0},${item.tien_dien || 0},${item.tien_nuoc || 0},${item.chi_phi_khac || 0},${item.tong_tien || 0},${statusText},${item.han_thanh_toan || ''}\n`;
+      csvContent += [item.ma_hoa_don || item.id, item.so_phong, item.ho_ten, item.thang_hoa_don, item.nam_hoa_don, item.tien_phong || 0, item.tien_dien || 0, item.tien_nuoc || 0, item.chi_phi_khac || 0, item.tong_tien || 0, statusText, item.han_thanh_toan].map(csvCell).join(',') + '\n';
     });
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -858,7 +968,7 @@ app.get('/api/invoices/export', async (req, res) => {
   }
 });
 
-app.get('/api/invoices/:id', async (req, res) => {
+app.get('/api/invoices/:id', authenticate, async (req, res) => {
   try {
     const item = await queryOne(`
       SELECT i.*, 
@@ -873,6 +983,9 @@ app.get('/api/invoices/:id', async (req, res) => {
     `, [req.params.id]);
 
     if (!item) return res.status(404).json({ error: 'Invoice not found' });
+    if (!(await canAccessRoom(req.user, item.phong_id, item.khach_thue_id))) {
+      return res.status(403).json({ error: 'Không có quyền xem hóa đơn này' });
+    }
 
     // Repair invoices created by older versions that did not assign a payment code.
     // Persisting it is required so the SePay webhook can match the transfer later.
@@ -922,10 +1035,11 @@ app.get('/api/invoices/:id', async (req, res) => {
   }
 });
 
-app.post('/api/invoices', async (req, res) => {
+app.post('/api/invoices', adminOnly, async (req, res) => {
   try {
     const id = generateId();
-    const invoiceCode = `${PAYMENT_PREFIX}${Date.now().toString().slice(-10)}`;
+    // The random suffix keeps two invoices created in the same millisecond from colliding.
+    const invoiceCode = `${PAYMENT_PREFIX}${Date.now().toString().slice(-7)}${String(crypto.randomInt(1000)).padStart(3, '0')}`;
     const {
       room_id,
       tenant_id = null,
@@ -936,11 +1050,17 @@ app.post('/api/invoices', async (req, res) => {
       electricity_cost = 0,
       water_cost = 0,
       other_fees = 0,
-      total_amount,
       status = 'pending',
       due_date = null,
       notes = null,
     } = req.body;
+
+    if (!room_id) return res.status(400).json({ error: 'Vui lòng chọn phòng.' });
+    const invalid = validateInvoice({ invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, status });
+    if (invalid) return res.status(400).json({ error: invalid });
+    const roomExists = await queryOne('SELECT id FROM phong WHERE id = ?', [room_id]);
+    if (!roomExists) return res.status(404).json({ error: 'Room not found' });
+    const total_amount = invoiceTotal(room_rent, electricity_cost, water_cost, other_fees);
 
     await run(`
       INSERT INTO hoa_don (id, ma_hoa_don, phong_id, khach_thue_id, chi_so_dien_nuoc_id, thang_hoa_don, nam_hoa_don, tien_phong, tien_dien, tien_nuoc, chi_phi_khac, tong_tien, trang_thai, han_thanh_toan, ghi_chu)
@@ -950,13 +1070,14 @@ app.post('/api/invoices', async (req, res) => {
     const invoice = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [id]);
     res.status(201).json(mapInvoice(invoice));
   } catch (error) {
+    if (error.message?.includes('UNIQUE constraint failed')) return res.status(400).json({ error: duplicateInvoiceMessage });
     res.status(500).json({ error: error.message });
   }
 });
 
-app.put('/api/invoices/:id', async (req, res) => {
+app.put('/api/invoices/:id', adminOnly, async (req, res) => {
   try {
-    const { room_id, tenant_id, meter_reading_id, invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, total_amount, status, due_date, notes, paid_date } = req.body;
+    const { room_id, tenant_id, meter_reading_id, invoice_month, invoice_year, room_rent, electricity_cost, water_cost, other_fees, status, due_date, notes, paid_date } = req.body;
     const existing = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Invoice not found' });
 
@@ -970,12 +1091,24 @@ app.put('/api/invoices/:id', async (req, res) => {
       tien_dien: electricity_cost !== undefined ? electricity_cost : existing.tien_dien,
       tien_nuoc: water_cost !== undefined ? water_cost : existing.tien_nuoc,
       chi_phi_khac: other_fees !== undefined ? other_fees : existing.chi_phi_khac,
-      tong_tien: total_amount !== undefined ? total_amount : existing.tong_tien,
       trang_thai: status !== undefined ? status : existing.trang_thai,
       han_thanh_toan: due_date !== undefined ? due_date : existing.han_thanh_toan,
       ngay_thanh_toan: paid_date !== undefined ? paid_date : existing.ngay_thanh_toan,
       ghi_chu: notes !== undefined ? notes : existing.ghi_chu,
     };
+
+    const invalid = validateInvoice({
+      invoice_month: updated.thang_hoa_don,
+      invoice_year: updated.nam_hoa_don,
+      room_rent: updated.tien_phong,
+      electricity_cost: updated.tien_dien,
+      water_cost: updated.tien_nuoc,
+      other_fees: updated.chi_phi_khac,
+      status: updated.trang_thai,
+    });
+    if (invalid) return res.status(400).json({ error: invalid });
+    updated.tong_tien = invoiceTotal(updated.tien_phong, updated.tien_dien, updated.tien_nuoc, updated.chi_phi_khac);
+    if (updated.trang_thai === 'paid' && !updated.ngay_thanh_toan) updated.ngay_thanh_toan = todayInVietnam();
 
     await run(`
       UPDATE hoa_don
@@ -984,13 +1117,15 @@ app.put('/api/invoices/:id', async (req, res) => {
     `, [updated.phong_id, updated.khach_thue_id, updated.chi_so_dien_nuoc_id, updated.thang_hoa_don, updated.nam_hoa_don, updated.tien_phong, updated.tien_dien, updated.tien_nuoc, updated.chi_phi_khac, updated.tong_tien, updated.trang_thai, updated.han_thanh_toan, updated.ngay_thanh_toan, updated.ghi_chu, req.params.id]);
 
     const result = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [req.params.id]);
+    io.emit('invoice_updated', { id: req.params.id, status: result.trang_thai });
     res.json(mapInvoice(result));
   } catch (error) {
+    if (error.message?.includes('UNIQUE constraint failed')) return res.status(400).json({ error: duplicateInvoiceMessage });
     res.status(500).json({ error: error.message });
   }
 });
 
-app.delete('/api/invoices/:id', async (req, res) => {
+app.delete('/api/invoices/:id', adminOnly, async (req, res) => {
   try {
     await run('DELETE FROM hoa_don WHERE id = ?', [req.params.id]);
     res.status(204).end();
@@ -999,9 +1134,9 @@ app.delete('/api/invoices/:id', async (req, res) => {
   }
 });
 
-app.post('/api/invoices/mark-overdue', async (req, res) => {
+app.post('/api/invoices/mark-overdue', authenticate, async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayInVietnam();
     await run(`
       UPDATE hoa_don
       SET trang_thai = 'overdue'
@@ -1015,16 +1150,18 @@ app.post('/api/invoices/mark-overdue', async (req, res) => {
   }
 });
 
-app.put('/api/invoices/:id/paid', async (req, res) => {
+app.put('/api/invoices/:id/paid', adminOnly, async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayInVietnam();
     await run(`
       UPDATE hoa_don
-      SET trang_thai = 'paid', ngay_thanh_toan = ?
+      SET trang_thai = 'paid', ngay_thanh_toan = ?, phuong_thuc_thanh_toan = COALESCE(phuong_thuc_thanh_toan, 'Xác nhận thủ công'), ngay_cap_nhat = CURRENT_TIMESTAMP
       WHERE id = ?
     `, [today, req.params.id]);
 
     const updated = await queryOne('SELECT * FROM hoa_don WHERE id = ?', [req.params.id]);
+    if (!updated) return res.status(404).json({ error: 'Invoice not found' });
+    io.emit('invoice_updated', { id: req.params.id, status: 'paid' });
     res.json(mapInvoice(updated));
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1033,9 +1170,9 @@ app.put('/api/invoices/:id/paid', async (req, res) => {
 
 
 // ----------------- REPAIR REQUESTS API -----------------
-app.get('/api/repair_requests', async (req, res) => {
+app.get('/api/repair_requests', authenticate, async (req, res) => {
   try {
-    const tenantId = req.query.tenant_id ? String(req.query.tenant_id) : null;
+    const tenantId = req.user.role === 'TENANT' ? req.user.id : (req.query.tenant_id ? String(req.query.tenant_id) : null);
     const data = await query(`
       SELECT rr.*, 
              r.so_phong, r.tang, r.dien_tich, r.gia_phong, r.trang_thai as room_status, r.mo_ta as room_desc, r.so_nguoi_toi_da,
@@ -1078,7 +1215,7 @@ app.get('/api/repair_requests', async (req, res) => {
   }
 });
 
-app.get('/api/repair_requests/:id', async (req, res) => {
+app.get('/api/repair_requests/:id', authenticate, async (req, res) => {
   try {
     const item = await queryOne(`
       SELECT rr.*, 
@@ -1091,6 +1228,9 @@ app.get('/api/repair_requests/:id', async (req, res) => {
     `, [req.params.id]);
 
     if (!item) return res.status(404).json({ error: 'Repair request not found' });
+    if (!(await canAccessRoom(req.user, item.phong_id, item.khach_thue_id))) {
+      return res.status(403).json({ error: 'Không có quyền xem yêu cầu này' });
+    }
 
     res.json({
       ...mapRepair(item),
@@ -1121,11 +1261,15 @@ app.get('/api/repair_requests/:id', async (req, res) => {
   }
 });
 
-app.post('/api/repair_requests', async (req, res) => {
+app.post('/api/repair_requests', adminOnly, async (req, res) => {
   try {
     const id = generateId();
     const { room_id, tenant_id = null, title, description = '', priority = 'medium', status = 'new', assigned_to = null } = req.body;
-    
+    if (!room_id) return res.status(400).json({ error: 'Vui lòng chọn phòng cần sửa chữa.' });
+    if (!String(title || '').trim()) return res.status(400).json({ error: 'Vui lòng nhập tiêu đề sự cố.' });
+    if (!PRIORITIES.has(priority)) return res.status(400).json({ error: 'Mức độ ưu tiên không hợp lệ.' });
+    if (!REPAIR_STATUSES.has(status)) return res.status(400).json({ error: 'Trạng thái không hợp lệ.' });
+
     if (tenant_id) {
       const assigned = await queryOne('SELECT id FROM hop_dong_thue WHERE phong_id = ? AND khach_thue_id = ? AND dang_hoat_dong = 1', [room_id, tenant_id]);
       if (!assigned) {
@@ -1146,11 +1290,13 @@ app.post('/api/repair_requests', async (req, res) => {
   }
 });
 
-app.put('/api/repair_requests/:id', async (req, res) => {
+app.put('/api/repair_requests/:id', adminOnly, async (req, res) => {
   try {
     const { room_id, tenant_id, title, description, priority, status, assigned_to, resolution_notes, resolved_at } = req.body;
     const existing = await queryOne('SELECT * FROM yeu_cau_sua_chua WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Repair request not found' });
+    if (priority !== undefined && !PRIORITIES.has(priority)) return res.status(400).json({ error: 'Mức độ ưu tiên không hợp lệ.' });
+    if (status !== undefined && !REPAIR_STATUSES.has(status)) return res.status(400).json({ error: 'Trạng thái không hợp lệ.' });
 
     let finalResolvedAt = resolved_at;
     if (status === 'resolved' && existing.trang_thai !== 'resolved' && !resolved_at) {
@@ -1188,7 +1334,7 @@ app.put('/api/repair_requests/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/repair_requests/:id', async (req, res) => {
+app.delete('/api/repair_requests/:id', adminOnly, async (req, res) => {
   try {
     const existing = await queryOne('SELECT khach_thue_id FROM yeu_cau_sua_chua WHERE id = ?', [req.params.id]);
     await run('DELETE FROM yeu_cau_sua_chua WHERE id = ?', [req.params.id]);
@@ -1201,7 +1347,10 @@ app.delete('/api/repair_requests/:id', async (req, res) => {
 
 
 // Tenant contract and portal routes.
-setupContracts(app, query, queryOne, run);
+setupContracts(app, query, queryOne, run, { authenticate, requireAdmin, requireTenant });
+
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Không tìm thấy API' }));
+app.use(errorHandler);
 
 if (process.env.NODE_ENV !== 'test') {
   dbReady

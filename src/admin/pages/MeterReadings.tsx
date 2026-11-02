@@ -9,7 +9,7 @@ import {
 } from 'react-icons/pi';
 import { Modal } from '../components/ui/Modal';
 import { Button } from '../components/ui/Button';
-import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { Input, Spinner, EmptyState } from '../components/ui/Input';
 import {
   getMeterReadings,
   createMeterReading,
@@ -44,7 +44,7 @@ export function MeterReadings() {
   const [loadingPrevious, setLoadingPrevious] = useState(false);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, []);
 
   async function loadData() {
@@ -180,7 +180,7 @@ export function MeterReadings() {
       setIsDeleteModalOpen(false);
     } catch (error) {
       console.error('Failed to delete reading:', error);
-      alert('Không thể xóa chỉ số.');
+      alert(error instanceof Error ? error.message : 'Không thể xóa chỉ số.');
     }
   }
 
@@ -295,7 +295,7 @@ export function MeterReadings() {
                         <span className="font-serif lining-nums tabular-nums text-wood-700 font-bold text-lg">{total.toLocaleString('vi-VN')}đ</span>
                       </td>
                       <td className="px-4 py-3 align-middle text-right">
-                        <div className="flex justify-end items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex justify-end items-center gap-1.5 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => openEditModal(reading)}
                             className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200"

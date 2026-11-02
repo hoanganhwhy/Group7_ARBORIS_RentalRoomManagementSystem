@@ -1,17 +1,11 @@
 import { GoogleGenAI } from '@google/genai';
 import { aiTools } from '../ai/tools.js';
 import { getSystemPrompt } from '../ai/prompts.js';
-import db from '../../db.js'; // Will adapt this path or create a service later
+import { query } from '../../db.js';
 
-// Helper for Promisified DB queries
-const query = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
-};
+const MAX_TOOL_ROUNDS = 5;
+const MAX_HISTORY_MESSAGES = 20;
+const MAX_MESSAGE_LENGTH = 2000;
 
 // Implement tool handlers
 const handleToolCall = async (callName, args, user) => {
@@ -26,7 +20,7 @@ const handleToolCall = async (callName, args, user) => {
           params.push(args.maxPrice);
         }
         if (args.area) {
-          conditions.push("n.ten_nha_tro LIKE ?");
+          conditions.push("p.khu_vuc LIKE ?");
           params.push(`%${args.area}%`);
         }
         if (args.airConditioner) conditions.push("p.dieu_hoa = 1");
@@ -42,9 +36,9 @@ const handleToolCall = async (callName, args, user) => {
         if (conditions.length > 0) {
           sql += " WHERE " + conditions.join(" AND ");
         }
-        
+
         let rooms = await query(sql, params);
-        
+
         // Ẩn địa chỉ nếu phòng đã có người thuê (bảo mật) đối với khách
         if (user.role !== 'ADMIN' && user.role !== 'MANAGER') {
           rooms = rooms.map(room => {
@@ -63,14 +57,14 @@ const handleToolCall = async (callName, args, user) => {
         const conditions = ["p.so_phong = ?"];
         const params = [args.roomCode];
         if (args.area) {
-          conditions.push("n.ten_nha_tro LIKE ?");
+          conditions.push("p.khu_vuc LIKE ?");
           params.push(`%${args.area}%`);
         }
-        
+
         let sql = "SELECT p.id, p.so_phong, p.tang, p.gia_phong, p.trang_thai, p.mo_ta, p.dieu_hoa, p.may_giat, p.noi_that, p.ban_cong, p.khu_vuc, n.dia_chi, n.ten_nha_tro FROM phong p LEFT JOIN nha_tro n ON p.nha_tro_id = n.id WHERE " + conditions.join(" AND ");
         const rooms = await query(sql, params);
         if (rooms.length === 0) return { success: false, message: "Không tìm thấy phòng." };
-        
+
         let room = rooms[0];
         // Ẩn địa chỉ nếu phòng đã có người thuê (bảo mật) đối với khách
         if (user.role !== 'ADMIN' && user.role !== 'MANAGER') {
@@ -146,7 +140,7 @@ const handleToolCall = async (callName, args, user) => {
         const conditions = ["p.so_phong = ?"];
         const params = [args.roomCode];
         if (args.area) {
-          conditions.push("n.ten_nha_tro LIKE ?");
+          conditions.push("p.khu_vuc LIKE ?");
           params.push(`%${args.area}%`);
         }
         const invoices = await query(`
@@ -166,16 +160,16 @@ const handleToolCall = async (callName, args, user) => {
         const conditions = ["p.so_phong = ?"];
         const params = [args.roomCode];
         if (args.area) {
-          conditions.push("n.ten_nha_tro LIKE ?");
+          conditions.push("p.khu_vuc LIKE ?");
           params.push(`%${args.area}%`);
         }
         const requests = await query(`
-          SELECT tieu_de, mo_ta, trang_thai, ngay_bao, muc_do_uu_tien
+          SELECT y.tieu_de, y.mo_ta, y.trang_thai, y.ngay_bao, y.muc_do_uu_tien
           FROM yeu_cau_sua_chua y
           JOIN phong p ON y.phong_id = p.id
           LEFT JOIN nha_tro n ON p.nha_tro_id = n.id
           WHERE ${conditions.join(" AND ")}
-          ORDER BY ngay_bao DESC
+          ORDER BY y.ngay_bao DESC
           LIMIT 10
         `, params);
         return { success: true, data: requests };
@@ -187,7 +181,7 @@ const handleToolCall = async (callName, args, user) => {
         const conditions = ["p.so_phong = ?"];
         const params = [args.roomCode];
         if (args.area) {
-          conditions.push("n.ten_nha_tro LIKE ?");
+          conditions.push("p.khu_vuc LIKE ?");
           params.push(`%${args.area}%`);
         }
 
@@ -238,7 +232,7 @@ const handleToolCall = async (callName, args, user) => {
             )
             AND k.id != ?
         `, [user.id, user.id]);
-        
+
         if (roommates.length === 0) {
            return { success: true, message: "Bạn đang ở một mình trong phòng, không có ai ở ghép cùng bạn." };
         }
@@ -257,25 +251,29 @@ const handleToolCall = async (callName, args, user) => {
 export const chat = async (req, res) => {
   try {
     const { message, history } = req.body;
-    const user = req.user || { role: 'GUEST', id: null }; // From auth middleware
+    const user = req.user;
 
     if (message === undefined || message === null || String(message).trim() === '') {
       return res.status(400).json({ error: 'Nội dung tin nhắn không được để trống' });
     }
 
     const userMessage = String(message).trim();
+    if (userMessage.length > MAX_MESSAGE_LENGTH) {
+      return res.status(400).json({ error: 'Tin nhắn quá dài. Vui lòng rút gọn nội dung.' });
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: 'Hệ thống AI chưa được cấu hình (Thiếu API Key)' });
+      return res.status(503).json({ error: 'Hệ thống AI chưa được cấu hình (Thiếu API Key)' });
     }
 
     const ai = new GoogleGenAI({ apiKey });
     const model = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
 
     // Format history for Gemini SDK
-    const formattedHistory = (history || [])
+    const formattedHistory = (Array.isArray(history) ? history : [])
       .filter(msg => msg.content && typeof msg.content === 'string') // Ignore empty
+      .slice(-MAX_HISTORY_MESSAGES)
       .map(msg => ({
         role: (msg.role === 'ai' || msg.role === 'assistant') ? 'model' : 'user',
         parts: [{ text: msg.content }]
@@ -294,26 +292,22 @@ export const chat = async (req, res) => {
 
     let response = await chatSession.sendMessage({ message: userMessage });
 
-    // Handle Function Calls if any
-    while (response.functionCalls && response.functionCalls.length > 0) {
-      const call = response.functionCalls[0];
-      const result = await handleToolCall(call.name, call.args, user);
-      
-      // Send the tool response back to Gemini to get the final text response
-      response = await chatSession.sendMessage({
-        message: [{
-          functionResponse: {
-            name: call.name,
-            response: { result }
-          }
-        }]
-      });
+    // Gemini expects one answer for every function call in a turn. The round limit
+    // stops a model that keeps calling tools from looping forever.
+    for (let round = 0; round < MAX_TOOL_ROUNDS && response.functionCalls?.length > 0; round += 1) {
+      const parts = await Promise.all(response.functionCalls.map(async (call) => ({
+        functionResponse: {
+          name: call.name,
+          response: { result: await handleToolCall(call.name, call.args || {}, user) },
+        },
+      })));
+      response = await chatSession.sendMessage({ message: parts });
     }
 
     res.json({ reply: response.text || "Xin lỗi, không có nội dung phản hồi." });
 
   } catch (error) {
     console.error("AI Chat Error:", error);
-    res.status(500).json({ error: 'Lỗi khi xử lý AI chat: ' + error.message });
+    res.status(500).json({ error: 'Trợ lý AI đang gặp sự cố. Vui lòng thử lại sau.' });
   }
 };

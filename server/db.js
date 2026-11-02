@@ -2,16 +2,17 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '..', '.env'), quiet: true });
 const isTest = process.env.NODE_ENV === 'test';
-const dbPath = isTest ? ':memory:' : join(__dirname, 'hostelmate.sqlite');
+const dbPath = isTest ? ':memory:' : (process.env.DB_PATH || join(__dirname, 'hostelmate.sqlite'));
 
-if (!isTest && process.env.RESET_DB_ON_START === 'true' && fs.existsSync(dbPath)) {
-  fs.rmSync(dbPath, { force: true });
+if (!isTest && process.env.RESET_DB_ON_START === 'true') {
+  for (const suffix of ['', '-shm', '-wal']) fs.rmSync(`${dbPath}${suffix}`, { force: true });
 }
 
 const require = createRequire(import.meta.url);
@@ -21,8 +22,8 @@ try {
   const sqlite3 = require('sqlite3');
   db = new sqlite3.Database(dbPath);
 } catch {
-  // Node.js 22+ includes a built-in SQLite driver. This fallback is useful in
-  // restricted/offline environments where sqlite3 cannot download its native binary.
+  // sqlite3 is an optional dependency because its native binary does not install on
+  // every machine. Node.js 22.13+ has a built-in SQLite driver to fall back on.
   const { DatabaseSync } = require('node:sqlite');
   db = new DatabaseSync(dbPath);
   driver = 'node:sqlite';
@@ -84,6 +85,26 @@ export const closeDatabase = () => {
   });
 };
 
+const contractColumns = 'id, phong_id, khach_thue_id, ngay_bat_dau, ngay_ket_thuc, dang_hoat_dong, tien_dat_coc, la_nguoi_dai_dien, ngay_het_han_hop_dong, ghi_chu, chu_ky_khach, trang_thai_ky, file_hop_dong, ngay_tao, ngay_cap_nhat';
+
+const contractTableSql = (name) => `CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  phong_id TEXT NOT NULL REFERENCES phong(id) ON DELETE CASCADE,
+  khach_thue_id TEXT NOT NULL REFERENCES khach_thue(id) ON DELETE CASCADE,
+  ngay_bat_dau TEXT NOT NULL,
+  ngay_ket_thuc TEXT,
+  dang_hoat_dong INTEGER NOT NULL DEFAULT 1,
+  tien_dat_coc REAL DEFAULT 0,
+  la_nguoi_dai_dien INTEGER NOT NULL DEFAULT 0,
+  ngay_het_han_hop_dong TEXT,
+  ghi_chu TEXT,
+  chu_ky_khach TEXT,
+  trang_thai_ky TEXT DEFAULT 'Chưa ký',
+  file_hop_dong TEXT,
+  ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP,
+  ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP
+);`;
+
 const schema = `
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
@@ -133,6 +154,8 @@ CREATE TABLE IF NOT EXISTS khach_thue (
   password TEXT,
   google_email TEXT UNIQUE,
   is_locked INTEGER DEFAULT 0,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  token_version INTEGER NOT NULL DEFAULT 0,
   ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP,
   ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -155,24 +178,7 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS hop_dong_thue (
-  id TEXT PRIMARY KEY,
-  phong_id TEXT NOT NULL REFERENCES phong(id) ON DELETE CASCADE,
-  khach_thue_id TEXT NOT NULL REFERENCES khach_thue(id) ON DELETE CASCADE,
-  ngay_bat_dau TEXT NOT NULL,
-  ngay_ket_thuc TEXT,
-  dang_hoat_dong INTEGER NOT NULL DEFAULT 1,
-  tien_dat_coc REAL DEFAULT 0,
-  la_nguoi_dai_dien INTEGER NOT NULL DEFAULT 0,
-  ngay_het_han_hop_dong TEXT,
-  ghi_chu TEXT,
-  chu_ky_khach TEXT,
-  trang_thai_ky TEXT DEFAULT 'Chưa ký',
-  file_hop_dong TEXT,
-  ngay_tao TEXT DEFAULT CURRENT_TIMESTAMP,
-  ngay_cap_nhat TEXT DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(phong_id, khach_thue_id, dang_hoat_dong)
-);
+${contractTableSql('hop_dong_thue')}
 
 CREATE TABLE IF NOT EXISTS chi_so_dien_nuoc (
   id TEXT PRIMARY KEY,
@@ -319,6 +325,7 @@ CREATE TABLE IF NOT EXISTS cai_dat (
   value TEXT
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hop_dong_active ON hop_dong_thue(phong_id, khach_thue_id) WHERE dang_hoat_dong = 1;
 CREATE INDEX IF NOT EXISTS idx_phong_status ON phong(trang_thai);
 CREATE INDEX IF NOT EXISTS idx_hop_dong_phong ON hop_dong_thue(phong_id, dang_hoat_dong);
 CREATE INDEX IF NOT EXISTS idx_hop_dong_khach ON hop_dong_thue(khach_thue_id, dang_hoat_dong);
@@ -329,13 +336,59 @@ CREATE INDEX IF NOT EXISTS idx_notification_target ON notifications(target_tenan
 CREATE INDEX IF NOT EXISTS idx_chat_participants ON chat_messages(sender_id, receiver_id);
 `;
 
+const addColumnIfMissing = async (table, column, definition) => {
+  const columns = await query(`PRAGMA table_info(${table})`);
+  if (!columns.some((item) => item.name === column)) {
+    await exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+};
+
+// Databases created by older versions need these changes before the schema's indexes apply.
+async function migrate() {
+  const contractTable = await queryOne("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'hop_dong_thue'");
+  if (contractTable?.sql?.includes('UNIQUE(phong_id, khach_thue_id, dang_hoat_dong)')) {
+    // The old constraint made it impossible to end a second contract for the same
+    // tenant and room, because two ended rows would collide.
+    await exec(`
+      BEGIN;
+      ${contractTableSql('hop_dong_thue_new')}
+      INSERT INTO hop_dong_thue_new (${contractColumns}) SELECT ${contractColumns} FROM hop_dong_thue;
+      DROP TABLE hop_dong_thue;
+      ALTER TABLE hop_dong_thue_new RENAME TO hop_dong_thue;
+      COMMIT;
+    `);
+  }
+
+  const tenantTable = await queryOne("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'khach_thue'");
+  if (tenantTable) {
+    await addColumnIfMissing('khach_thue', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0');
+    await addColumnIfMissing('khach_thue', 'token_version', 'INTEGER NOT NULL DEFAULT 0');
+  }
+}
+
+async function hashLegacyPasswords() {
+  const tenants = await query("SELECT id, password FROM khach_thue WHERE password IS NOT NULL AND password NOT LIKE '$2%'");
+  for (const tenant of tenants) {
+    await run('UPDATE khach_thue SET password = ?, must_change_password = 1 WHERE id = ?', [await bcrypt.hash(String(tenant.password), 10), tenant.id]);
+  }
+  const users = await query("SELECT id, password_hash FROM users WHERE password_hash NOT LIKE '$2%'");
+  for (const user of users) {
+    await run('UPDATE users SET password_hash = ? WHERE id = ?', [await bcrypt.hash(String(user.password_hash), 10), user.id]);
+  }
+}
+
 async function initialize() {
+  await migrate();
   await exec(schema);
   await run(`INSERT OR IGNORE INTO nha_tro (id, ten_nha_tro, dia_chi) VALUES (1, 'ARBORIS', 'Chưa cập nhật')`);
-  await run(`
-    INSERT OR IGNORE INTO users (id, username, password_hash, role, full_name)
-    VALUES ('admin-default', 'admin', '123456', 'ADMIN', 'Quản trị viên')
-  `);
+  const defaultAdmin = await queryOne("SELECT id FROM users WHERE id = 'admin-default'");
+  if (!defaultAdmin) {
+    await run(
+      "INSERT INTO users (id, username, password_hash, role, full_name) VALUES ('admin-default', 'admin', ?, 'ADMIN', 'Quản trị viên')",
+      [await bcrypt.hash('123456', 10)]
+    );
+  }
+  await hashLegacyPasswords();
   const defaults = {
     bank_id: process.env.BANK_ID || '',
     bank_account_no: process.env.BANK_ACCOUNT_NO || '',

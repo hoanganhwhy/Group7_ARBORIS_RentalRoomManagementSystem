@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, X, Send, Bot, User, Loader2 } from 'lucide-react';
+import { MessageSquare, X, Send, Bot, Loader2 } from 'lucide-react';
 import { sendAiMessage } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import ReactMarkdown from 'react-markdown';
@@ -14,7 +14,7 @@ export function AiChatbot() {
       role: 'ai',
       content: user?.role === 'ADMIN' 
         ? 'Xin chào Chủ nhà! Tôi có thể giúp gì cho bạn hôm nay? (VD: Hướng dẫn quản lý khách thuê, thống kê phòng...)'
-        : 'Xin chào! Tôi là trợ lý ảo HostelMate. Bạn muốn tìm phòng hay cần hỗ trợ gì ạ?'
+        : 'Xin chào! Tôi là trợ lý ảo ARBORIS. Bạn muốn tìm phòng hay cần hỗ trợ gì ạ?'
     }
   ]);
   const [input, setInput] = useState('');

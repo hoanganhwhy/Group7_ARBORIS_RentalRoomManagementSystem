@@ -1,14 +1,9 @@
 export default {
   testEnvironment: 'node',
   transform: {},
+  setupFiles: ['./tests/setup-env.js'],
   testMatch: ['**/tests/**/*.test.js'],
   testPathIgnorePatterns: ['/node_modules/', '/coverage/'],
-  coveragePathIgnorePatterns: [
-    '/node_modules/',
-    '/src/controllers/ai.controller.js',
-    '/src/ai/prompts.js',
-    '/contracts.js',
-    '/server.js',
-    '/integrated-routes.js'
-  ]
+  coveragePathIgnorePatterns: ['/node_modules/', '/tests/'],
+  coverageThreshold: { global: { lines: 70 } },
 };

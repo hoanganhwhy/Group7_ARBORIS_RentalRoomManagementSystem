@@ -1,31 +1,25 @@
-import { useEffect, useState, useRef } from 'react';
-import { 
-  PiPlusLight, 
-  PiUsersLight, 
-  PiPencilSimpleLight, 
-  PiTrashLight, 
-  PiPhoneLight, 
-  PiEnvelopeSimpleLight, 
-  PiHouseLineLight, 
-  PiCrownLight, 
-  PiSignOutLight, 
-  PiUserPlusLight, 
-  PiMagnifyingGlassLight, 
-  PiEyeLight, 
+import { useEffect, useState } from 'react';
+import {
+  PiPlusLight,
+  PiUsersLight,
+  PiPencilSimpleLight,
+  PiTrashLight,
+  PiPhoneLight,
+  PiEnvelopeSimpleLight,
+  PiCrownLight,
+  PiSignOutLight,
+  PiUserPlusLight,
+  PiMagnifyingGlassLight,
+  PiEyeLight,
   PiEyeSlashLight,
   PiIdentificationCardLight,
-  PiCaretDownLight,
-  PiCheckLight,
   PiFadersLight,
   PiDownloadSimpleLight,
-  PiXLight,
-  PiCheckSquareLight,
-  PiSquareLight
 } from 'react-icons/pi';
 import { Modal } from '../components/ui/Modal';
 import { FilterDropdown } from '../components/ui/FilterDropdown';
 import { Button } from '../components/ui/Button';
-import { Input, Badge, Spinner, EmptyState } from '../components/ui/Input';
+import { Input, Spinner, EmptyState } from '../components/ui/Input';
 import {
   getTenants,
   createTenant,
@@ -119,7 +113,7 @@ export function Tenants() {
   const parsedPhone = parsePhone(formData.phone);
 
   useEffect(() => {
-    loadData();
+    void loadData();
     
     const handleOpenModal = (e: any) => {
       if (e.detail?.action === 'new-tenant') {
@@ -396,7 +390,7 @@ export function Tenants() {
       await loadData();
       setIsModalOpen(false);
     } catch (error) {
-      alert('Không thể lưu thông tin. Vui lòng thử lại.');
+      alert(error instanceof Error ? error.message : 'Không thể lưu thông tin. Vui lòng thử lại.');
     } finally {
       setSaving(false);
     }
@@ -432,7 +426,7 @@ export function Tenants() {
       await endRoomAssignment(assignment.id);
       await loadData();
     } catch (error) {
-      alert('Không thể trả phòng. Vui lòng thử lại.');
+      alert(error instanceof Error ? error.message : 'Không thể trả phòng. Vui lòng thử lại.');
     }
   }
 
@@ -443,7 +437,7 @@ export function Tenants() {
       await loadData();
       setIsDeleteModalOpen(false);
     } catch (error) {
-      alert('Không thể xóa người thuê. Có thể vẫn còn dữ liệu liên quan.');
+      alert(error instanceof Error ? error.message : 'Không thể xóa người thuê. Có thể vẫn còn dữ liệu liên quan.');
     }
   }
 
@@ -695,7 +689,7 @@ export function Tenants() {
                           )}
                         </td>
                         <td className="px-4 py-2.5 align-top text-right">
-                          <div className="flex justify-end items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pt-1">
+                          <div className="flex justify-end items-center gap-1 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity pt-1">
                             <button onClick={() => openAssignModal(tenant)} className="p-1.5 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors bg-white border border-transparent hover:border-wood-200" title="Gán phòng">
                               <PiUserPlusLight className="w-4 h-4" />
                             </button>

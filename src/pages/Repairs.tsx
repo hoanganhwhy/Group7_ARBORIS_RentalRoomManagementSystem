@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PiCalendarBlankLight,
   PiCheckCircleLight,
-  PiClockLight,
   PiPencilSimpleLight,
   PiPlusLight,
   PiTrashLight,
@@ -10,13 +9,14 @@ import {
   PiEyeLight,
   PiWarningLight,
   PiUserLight,
-  PiChatCircleLight
+  PiChatCircleLight,
 } from 'react-icons/pi';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input, Badge, EmptyState, Spinner } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import {
+  confirmMyRepairRequest,
   createMyRepairRequest,
   deleteMyRepairRequest,
   getMyRepairRequests,
@@ -64,9 +64,7 @@ export function Repairs() {
       if (showSpinner) setLoading(true);
       const [repairResult, portalResponse] = await Promise.all([
         getMyRepairRequests(),
-        fetch(`${API_URL}/tenant/portal?tenant_id=${encodeURIComponent(tenantId)}`, {
-          credentials: 'include',
-        }),
+        fetch(`${API_URL}/tenant/portal`, { credentials: 'include' }),
       ]);
 
       const data = repairResult || [];
@@ -191,7 +189,7 @@ export function Repairs() {
 
   async function handleConfirmDone(repair: RepairRequest) {
     try {
-      await updateMyRepairRequest(repair.id, { status: 'closed' });
+      await confirmMyRepairRequest(repair.id);
       await loadData(false);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Không thể xác nhận.');

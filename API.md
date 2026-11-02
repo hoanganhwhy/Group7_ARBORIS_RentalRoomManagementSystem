@@ -1,9 +1,30 @@
-# Tài liệu Danh sách REST API - HostelMate
+# Tài liệu Danh sách REST API - ARBORIS
 
-Tài liệu này tổng hợp toàn bộ các API Endpoints được xây dựng bằng **Node.js + Express** và kết nối cơ sở dữ liệu **SQLite** của hệ thống HostelMate.
+Tài liệu này tổng hợp toàn bộ các API Endpoints được xây dựng bằng **Node.js + Express** và kết nối cơ sở dữ liệu **SQLite** của hệ thống ARBORIS.
 
 * **Base URL**: `http://localhost:5000`
 * **Định dạng dữ liệu gửi nhận**: `JSON`
+* **Xác thực**: đăng nhập bằng `POST /api/auth/login`, server trả JWT trong cookie `httpOnly` tên `token` (hoặc gửi header `Authorization: Bearer <token>`).
+
+### Quyền truy cập
+
+| Nhóm | Quyền |
+| :--- | :--- |
+| Phòng, người thuê, hợp đồng thuê, điện nước (mục 1-4) | Chỉ Admin |
+| `GET /api/invoices`, `GET /api/invoices/:id`, `GET /api/repair_requests`, `GET /api/repair_requests/:id` | Admin xem tất cả; người thuê chỉ xem dữ liệu của mình và phòng đang thuê |
+| Tạo, sửa, xóa hóa đơn; `GET /api/invoices/export`; `PUT /api/invoices/:id/paid` | Chỉ Admin |
+| `POST /api/repair_requests`, `PUT`/`DELETE /api/repair_requests/:id` | Chỉ Admin |
+| `GET`/`POST`/`PUT`/`DELETE /api/tenant/repair_requests` | Người thuê, tự gắn theo tài khoản đăng nhập |
+| `PUT /api/tenant/repair_requests/:id/confirm` | Người thuê xác nhận đã sửa xong (chuyển `resolved` sang `closed`) |
+| `GET /api/tenant/portal` | Người thuê xem của mình; Admin truyền `?tenant_id=` |
+| `POST /api/contracts/:id/sign` | Chỉ người thuê đứng tên hợp đồng |
+| `GET /api/contracts/:id/download` | Admin hoặc người thuê đứng tên hợp đồng |
+| `POST /api/invoices/:id/report-payment` | Người thuê báo đã chuyển khoản |
+| `PATCH /api/admin/invoices/:id/confirm-payment` | Admin xác nhận thanh toán |
+| `POST /api/ai/chat` | Đã đăng nhập, tối đa 20 tin nhắn/phút |
+| `POST /api/webhooks/sepay` | Xác thực bằng `SEPAY_WEBHOOK_API_KEY` |
+
+Thiếu đăng nhập trả `401`, sai quyền trả `403`, dữ liệu không hợp lệ trả `400` kèm `{ "error": "..." }`.
 
 ---
 
@@ -17,7 +38,7 @@ Quản lý thông tin chi tiết các phòng trọ, trạng thái thuê và sứ
 | `GET` | `/api/rooms/:id` | Lấy thông tin chi tiết một phòng trọ cụ thể | `id` của phòng trên URL |
 | `POST` | `/api/rooms` | Thêm phòng trọ mới | `{ room_number, floor, area_sqm, monthly_rent, status, description, max_occupants }` |
 | `PUT` | `/api/rooms/:id` | Cập nhật thông tin phòng trọ | Các trường cần sửa đổi |
-| `DELETE` | `/api/rooms/:id` | Xóa phòng trọ (tự động xóa hợp đồng liên quan) | `id` của phòng trên URL |
+| `DELETE` | `/api/rooms/:id` | Xóa phòng trọ. Bị từ chối khi phòng còn người thuê hoặc còn hóa đơn chưa thanh toán | `id` của phòng trên URL |
 
 ---
 
@@ -88,6 +109,6 @@ Tự động hóa việc lập phiếu thu tiền phòng trọ và dịch vụ, 
 | :--- | :--- | :--- | :--- |
 | `GET` | `/api/repair_requests` | Danh sách tất cả yêu cầu báo hỏng trong hệ thống | Không |
 | `GET` | `/api/repair_requests/:id` | Chi tiết thông tin yêu cầu báo hỏng cụ thể | `id` yêu cầu trên URL |
-| `POST` | `/api/repair_requests` | **Gửi yêu cầu báo hỏng** (Khách thuê báo hỏng thiết bị phòng) | `{ room_id, tenant_id, title, description, priority }` |
+| `POST` | `/api/repair_requests` | Admin tạo yêu cầu báo hỏng (khách thuê dùng `/api/tenant/repair_requests`) | `{ room_id, tenant_id, title, description, priority }` |
 | `PUT` | `/api/repair_requests/:id` | **Cập nhật tiến độ sửa chữa** (Chủ trọ cập nhật từ Mới tạo -> Đang sửa -> Đã xong kèm ghi chú xử lý) | `{ status, assigned_to, resolution_notes }` |
 | `DELETE` | `/api/repair_requests/:id` | Xóa yêu cầu sửa chữa | `id` yêu cầu trên URL |

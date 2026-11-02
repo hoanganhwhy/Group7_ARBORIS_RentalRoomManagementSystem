@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: [ "main", "develop", "nguyen-van-bao" ]
   pull_request:
     branches: [ "main", "develop" ]
 
@@ -11,26 +11,33 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [18.x, 20.x]
+        node-version: [22.x, 24.x]
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
-        
+        cache-dependency-path: |
+          package-lock.json
+          server/package-lock.json
+
     - name: Install dependencies
-      run: npm ci
-      
+      run: npm ci --ignore-scripts
+
     - name: Install server dependencies
-      run: cd server && npm ci
-      
+      run: cd server && npm ci --ignore-scripts
+
     - name: Check Code Linting
       run: npm run lint
-      
+
+    - name: Check TypeScript and production build
+      run: npm run verify
+
     - name: Run Backend Tests
-      run: npm run test:server -- --coverage
+      run: npm run test:coverage

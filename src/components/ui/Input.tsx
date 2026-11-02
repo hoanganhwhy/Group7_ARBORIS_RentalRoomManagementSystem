@@ -189,6 +189,8 @@ export function Badge({ status, variant = 'default', size = 'md' }: BadgeProps) 
     pending: 'Chưa thanh toán',
     paid: 'Đã thanh toán',
     overdue: 'Quá hạn',
+    waiting_confirmation: 'Chờ xác nhận',
+    review_needed: 'Cần kiểm tra',
     low: 'Thấp',
     medium: 'Trung bình',
     high: 'Cao',

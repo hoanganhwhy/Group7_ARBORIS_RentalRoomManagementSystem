@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Menu } from 'lucide-react';
 import { Sidebar as TenantSidebar } from './components/ui/Sidebar';
 import { Sidebar as AdminSidebar } from './admin/components/ui/Sidebar';
 import { TenantDashboard } from './pages/TenantDashboard';
@@ -43,9 +44,15 @@ function TenantBackground() {
 function AppContent() {
   const { user, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isAdmin = user?.role === 'ADMIN';
 
   useEffect(() => setCurrentPage('dashboard'), [user?.id, user?.role]);
+
+  const navigate = (page: Page) => {
+    setCurrentPage(page);
+    setIsSidebarOpen(false);
+  };
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center bg-cream-50"><div className="w-8 h-8 border-4 border-terra-500 border-t-transparent rounded-full animate-spin" /></div>;
@@ -77,16 +84,35 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-cream-100 flex">
       {isAdmin ? <AdminBackground /> : <TenantBackground />}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-charcoal-900/40 z-30 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
       {isAdmin ? (
         <AdminSidebar
           currentPage={currentPage as AdminPage}
-          onNavigate={(page) => setCurrentPage(page as Page)}
+          onNavigate={(page) => navigate(page as Page)}
+          isOpen={isSidebarOpen}
         />
       ) : (
-        <TenantSidebar currentPage={currentPage} onNavigate={setCurrentPage} />
+        <TenantSidebar currentPage={currentPage} onNavigate={navigate} isOpen={isSidebarOpen} />
       )}
-      <main className="flex-1 ml-72 min-h-screen relative" style={{ zIndex: 1 }}>
-        <div className="py-10 px-12 max-w-6xl mx-auto">
+      <main className="flex-1 min-w-0 lg:ml-72 min-h-screen relative" style={{ zIndex: 1 }}>
+        <div className="lg:hidden sticky top-0 z-20 flex items-center gap-3 px-4 py-3 bg-white border-b border-charcoal-100/50">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-2 -ml-2 rounded-xl text-charcoal-600 hover:bg-cream-50"
+            aria-label="Mở menu"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+          <span className="font-serif text-xl tracking-widest text-charcoal-900">ARBORIS</span>
+        </div>
+        <div className="py-6 px-4 sm:px-8 lg:py-10 lg:px-12 max-w-6xl mx-auto">
           {isAdmin ? renderAdminPage() : renderTenantPage()}
         </div>
       </main>

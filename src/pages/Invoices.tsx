@@ -1,13 +1,4 @@
 import { useEffect, useState } from 'react';
-import {
-  PiPlusLight,
-  PiReceiptLight,
-  PiPencilSimpleLight,
-  PiTrashLight,
-  PiCheckCircleLight,
-  PiClockLight,
-  PiWarningCircleLight,
-} from 'react-icons/pi';
 
 import {
   Plus,
@@ -17,7 +8,6 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
-  CreditCard,
 } from 'lucide-react';
 import { Modal } from '../components/ui/Modal';
 import { FilterDropdown } from '../components/ui/FilterDropdown';
@@ -37,8 +27,6 @@ import {
 } from '../lib/api';
 import type { Invoice, Room, MeterReading } from '../types';
 import { Pagination } from '../components/common/Pagination';
-import { PageSizeSelector } from '../components/common/PageSizeSelector';
-import { SearchInput } from '../components/common/SearchInput';
 
 export function Invoices() {
   const { user } = useAuth();
@@ -307,7 +295,7 @@ export function Invoices() {
   if (loading) return <Spinner />;
 
   if (payingInvoice) {
-    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); loadData(); }} />;
+    return <MockPaymentGateway invoiceId={payingInvoice.id} amount={Number(payingInvoice.total_amount)} onBack={() => { setPayingInvoice(null); void loadData(); }} />;
   }
 
   return (
@@ -316,7 +304,7 @@ export function Invoices() {
       <header className="flex items-start justify-between">
         <div>
           <h1 className="text-3xl font-serif lining-nums tabular-nums text-charcoal-900 tracking-wide">Hóa đơn</h1>
-          <p className="text-charcoal-400 mt-2 text-sm">Lập và quản lý hóa đơn thanh toán</p>
+          <p className="text-charcoal-400 mt-2 text-sm">{isTenant ? 'Xem và thanh toán hóa đơn của bạn' : 'Lập và quản lý hóa đơn thanh toán'}</p>
         </div>
         {!isTenant && (
           <Button onClick={openCreateModal}>
@@ -327,7 +315,7 @@ export function Invoices() {
       </header>
 
       {/* Financial Summary */}
-      <section className="grid grid-cols-3 gap-6">
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         <div className="bg-sage-50 rounded-2xl border border-sage-100 p-6">
           <div className="flex items-start justify-between">
             <div>
@@ -474,10 +462,10 @@ export function Invoices() {
                     <InvoiceStatusBadge status={invoice.status} isTenant={isTenant} />
                   </td>
                   <td className="px-4 py-3 align-middle text-right">
-                    <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center justify-end gap-1.5 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                       {isTenant ? (
                         <>
-                          {invoice.status === 'pending' && (
+                          {(invoice.status === 'pending' || invoice.status === 'overdue' || invoice.status === 'review_needed') && (
                             <button onClick={() => setPayingInvoice(invoice)} className="px-3 py-1.5 text-xs font-medium text-white bg-wood-600 hover:bg-wood-700 rounded-lg transition-colors">
                               Thanh toán
                             </button>
@@ -758,6 +746,7 @@ function InvoiceStatusBadge({
     paid: 'success',
     waiting_confirmation: 'warning',
     overdue: isTenant ? 'warning' : 'danger',
+    review_needed: 'warning',
   };
   
   if (isTenant && status === 'overdue') {

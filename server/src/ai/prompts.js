@@ -1,5 +1,5 @@
 export const getSystemPrompt = (role) => {
-  const basePrompt = `Bạn là trợ lý ảo của hệ thống quản lý phòng trọ HostelMate.
+  const basePrompt = `Bạn là trợ lý ảo của hệ thống quản lý phòng trọ ARBORIS.
 Chỉ sử dụng các công cụ được cung cấp để lấy dữ liệu nội bộ của hệ thống.
 Không sử dụng kiến thức từ Internet.
 5. Không tự suy đoán dữ liệu phòng, hóa đơn hoặc người thuê.

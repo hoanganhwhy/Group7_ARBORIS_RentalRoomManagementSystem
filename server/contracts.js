@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const setupContracts = (app, queryAll, queryOne, run) => {
+export const setupContracts = (app, queryAll, queryOne, run, { authenticate, requireAdmin, requireTenant }) => {
   const contractsDir = path.join(__dirname, 'uploads', 'contracts');
   fs.mkdirSync(contractsDir, { recursive: true });
 
@@ -79,7 +79,7 @@ export const setupContracts = (app, queryAll, queryOne, run) => {
     return { fileName, filePath };
   }
 
-  app.post('/api/contracts/:id/generate', async (req, res) => {
+  app.post('/api/contracts/:id/generate', authenticate, requireAdmin, async (req, res) => {
     try {
       const generated = await generateContractPdf(req.params.id);
       if (!generated) return res.status(404).json({ error: 'Contract not found' });
@@ -89,10 +89,11 @@ export const setupContracts = (app, queryAll, queryOne, run) => {
     }
   });
 
-  app.get('/api/contracts/:id/download', async (req, res) => {
+  app.get('/api/contracts/:id/download', authenticate, async (req, res) => {
     try {
       const contract = await queryOne('SELECT * FROM hop_dong_thue WHERE id = ?', [req.params.id]);
       if (!contract) return res.status(404).send('Not found');
+      if (req.user.role === 'TENANT' && contract.khach_thue_id !== req.user.id) return res.status(403).send('Forbidden');
       let filePath = contract.file_hop_dong ? path.join(contractsDir, contract.file_hop_dong) : '';
       if (!filePath || !fs.existsSync(filePath)) {
         const generated = await generateContractPdf(req.params.id);
@@ -105,12 +106,17 @@ export const setupContracts = (app, queryAll, queryOne, run) => {
     }
   });
 
-  app.post('/api/contracts/:id/sign', async (req, res) => {
+  app.post('/api/contracts/:id/sign', authenticate, requireTenant, async (req, res) => {
     try {
       const { signatureBase64 } = req.body || {};
-      if (!signatureBase64) return res.status(400).json({ error: 'Signature is required' });
-      const contract = await queryOne('SELECT id FROM hop_dong_thue WHERE id = ?', [req.params.id]);
+      if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(String(signatureBase64 || ''))) {
+        return res.status(400).json({ error: 'Chữ ký không hợp lệ' });
+      }
+      const contract = await queryOne('SELECT id, khach_thue_id, dang_hoat_dong, chu_ky_khach FROM hop_dong_thue WHERE id = ?', [req.params.id]);
       if (!contract) return res.status(404).json({ error: 'Contract not found' });
+      if (contract.khach_thue_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền ký hợp đồng này' });
+      if (!contract.dang_hoat_dong) return res.status(400).json({ error: 'Hợp đồng này đã kết thúc' });
+      if (contract.chu_ky_khach) return res.status(400).json({ error: 'Hợp đồng này đã được ký' });
       await run("UPDATE hop_dong_thue SET chu_ky_khach = ?, trang_thai_ky = 'Đã ký', ngay_cap_nhat = CURRENT_TIMESTAMP WHERE id = ?", [signatureBase64, req.params.id]);
       const generated = await generateContractPdf(req.params.id);
       res.json({ success: true, fileName: generated?.fileName || null });
@@ -119,9 +125,10 @@ export const setupContracts = (app, queryAll, queryOne, run) => {
     }
   });
 
-  app.get('/api/tenant/portal', async (req, res) => {
+  app.get('/api/tenant/portal', authenticate, async (req, res) => {
     try {
-      const { tenant_id } = req.query;
+      // A tenant only ever reads their own portal; the admin may look up any tenant.
+      const tenant_id = req.user.role === 'TENANT' ? req.user.id : req.query.tenant_id;
       if (!tenant_id) return res.status(400).json({ error: 'tenant_id required' });
       const assignments = await queryAll('SELECT * FROM hop_dong_thue WHERE khach_thue_id = ? AND dang_hoat_dong = 1', [tenant_id]);
       const rentals = [];

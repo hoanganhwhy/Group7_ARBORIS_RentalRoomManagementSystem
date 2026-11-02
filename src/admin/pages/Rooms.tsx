@@ -96,7 +96,7 @@ export function Rooms() {
   });
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { void loadData(); }, []);
 
   async function loadData() {
     try {
@@ -191,7 +191,7 @@ export function Rooms() {
       await loadData();
       setIsExtendModalOpen(false);
     } catch (error) {
-      alert('Không thể gia hạn hợp đồng. Vui lòng thử lại.');
+      alert(error instanceof Error ? error.message : 'Không thể gia hạn hợp đồng. Vui lòng thử lại.');
     } finally {
       setSaving(false);
     }
@@ -290,7 +290,7 @@ export function Rooms() {
         if (updated) setViewingRoom(updated);
       }
     } catch (error) {
-      alert('Không thể trả phòng. Vui lòng thử lại.');
+      alert(error instanceof Error ? error.message : 'Không thể trả phòng. Vui lòng thử lại.');
     }
   }
 
@@ -360,7 +360,7 @@ export function Rooms() {
       await Promise.all(Array.from(selectedRooms).map(id => updateRoom(id, { status: bulkStatus })));
       setIsBulkStatusModalOpen(false);
       setSelectedRooms(new Set());
-      loadData();
+      void loadData();
     } catch (error) {
       console.error(error);
     } finally {
@@ -376,7 +376,7 @@ export function Rooms() {
       await Promise.all(Array.from(selectedRooms).map(id => updateRoom(id, { monthly_rent: Number(bulkPrice) })));
       setIsBulkPriceModalOpen(false);
       setSelectedRooms(new Set());
-      loadData();
+      void loadData();
     } catch (error) {
       console.error(error);
     } finally {
@@ -731,7 +731,7 @@ export function Rooms() {
                       )}
                     </td>
                     <td className="p-4 pr-6 text-right">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center justify-end gap-2 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                         <button onClick={() => openEditModal(room)} className="p-2 rounded-lg text-charcoal-400 hover:text-wood-600 hover:bg-wood-50 transition-colors" title="Sửa">
                           <PiPencilSimpleLight className="w-4 h-4" />
                         </button>
@@ -1015,7 +1015,7 @@ export function Rooms() {
 
       {/* Extend Contract Modal */}
       <Modal isOpen={isExtendModalOpen} onClose={() => setIsExtendModalOpen(false)} title="Gia hạn hợp đồng" size="sm">
-        <form onSubmit={(e) => { e.preventDefault(); handleExtendContract(); }} className="p-5 space-y-4">
+        <form onSubmit={(e) => { e.preventDefault(); void handleExtendContract(); }} className="p-5 space-y-4">
           <div className="flex items-center gap-3 p-3 bg-charcoal-50 rounded-xl">
             <PiUserLight className="w-5 h-5 text-charcoal-500" />
             <div>
@@ -1136,7 +1136,7 @@ function PropertyCard({
         {/* Top Badges */}
         <div className="absolute top-3 left-3 right-3 flex justify-between items-start">
           <Badge status={room.status} variant={config.variant} size="sm" />
-          <div className="w-7 h-7 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="w-7 h-7 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
             <PiInfoLight className="w-4 h-4 text-white" />
           </div>
         </div>

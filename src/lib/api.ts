@@ -1,4 +1,4 @@
-import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest, RoommateRequest } from '../types';
+import type { Room, Tenant, RoomAssignment, MeterReading, Invoice, RepairRequest } from '../types';
 
 export interface PaginationParams {
   page?: number;
@@ -96,19 +96,6 @@ export async function updateRoom(id: string, room: Partial<Room>): Promise<Room>
 export async function deleteRoom(id: string): Promise<void> {
   return request<void>(`/rooms/${id}`, {
     method: 'DELETE',
-  });
-}
-
-// Users API
-export async function getAdminUsers(params?: PaginationParams): Promise<PaginatedResponse<any>> {
-  const query = params ? `?${new URLSearchParams(params as any).toString()}` : '';
-  return request<PaginatedResponse<any>>(`/admin/users${query}`);
-}
-
-export async function createTenantUser(username: string, password: string, full_name: string, phone: string): Promise<any> {
-  return request<any>('/admin/users', {
-    method: 'POST',
-    body: JSON.stringify({ username, password, full_name, phone })
   });
 }
 
@@ -332,31 +319,15 @@ export async function updateMyRepairRequest(
   });
 }
 
+export async function confirmMyRepairRequest(id: string): Promise<void> {
+  await request(`/tenant/repair_requests/${id}/confirm`, {
+    method: 'PUT',
+  });
+}
+
 export async function deleteMyRepairRequest(id: string): Promise<void> {
   return request<void>(`/tenant/repair_requests/${id}`, {
     method: 'DELETE',
-  });
-}
-
-// Roommate Requests API
-export async function getRoommateRequests(): Promise<RoommateRequest[]> {
-  return request<RoommateRequest[]>('/roommates');
-}
-
-export async function getMyRoommateRequests(): Promise<RoommateRequest[]> {
-  return request<RoommateRequest[]>('/roommates/my-requests');
-}
-
-export async function createRoommateRequest(data: { tieu_de: string; mo_ta?: string; gia_chia_se: number }): Promise<RoommateRequest> {
-  return request<RoommateRequest>('/roommates', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function closeRoommateRequest(id: number): Promise<{ success: boolean; message: string }> {
-  return request<{ success: boolean; message: string }>(`/roommates/${id}/close`, {
-    method: 'PUT',
   });
 }
 
@@ -433,108 +404,6 @@ export async function getSettings() {
   return res.json();
 }
 
-export async function updateSettings(data: any) {
-  const res = await fetch(`${BASE_URL}/settings`, {
-    method: 'PUT',
-    headers: getHeaders(),
-    credentials: 'include',
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to update settings');
-  return res.json();
-}
-
-// --- NOTIFICATIONS API ---
-export async function getNotifications(params?: PaginationParams & { archive?: boolean }): Promise<PaginatedResponse<any>> {
-  const queryParams: any = { ...params };
-  if (params?.archive) queryParams.archive = 'true';
-  const query = `?${new URLSearchParams(queryParams).toString()}`;
-  return request<PaginatedResponse<any>>(`/notifications/my${query}`);
-}
-
-export async function getNotificationDetail(id: number): Promise<any> {
-  return request<any>(`/notifications/${id}`);
-}
-
-export async function sendNotification(data: { title: string, content: string, targetType: 'all'|'personal', targetTenantId?: string }): Promise<any> {
-  return request<any>('/notifications', {
-    method: 'POST',
-    body: JSON.stringify(data)
-  });
-}
-
-export async function replyNotification(id: number, content: string): Promise<any> {
-  return request<any>(`/notifications/${id}/replies`, {
-    method: 'POST',
-    body: JSON.stringify({ content })
-  });
-}
-
-export async function markNotificationAsRead(id: number): Promise<any> {
-  return request<any>(`/notifications/${id}/read`, {
-    method: 'PATCH'
-  });
-}
-
-export async function deleteNotification(id: number): Promise<any> {
-  return request<any>(`/notifications/${id}`, {
-    method: 'DELETE'
-  });
-}
-
-export async function restoreNotification(id: number): Promise<any> {
-  return request<any>(`/notifications/${id}/restore`, {
-    method: 'PATCH'
-  });
-}
-
-// --- FRIENDS API ---
-export async function getFriends(): Promise<any[]> {
-  return request<any[]>('/friends');
-}
-
-export async function sendFriendRequest(phone_number: string): Promise<any> {
-  return request<any>('/friends/request', {
-    method: 'POST',
-    body: JSON.stringify({ phone_number })
-  });
-}
-
-export async function respondFriendRequest(request_id: string, action: 'accept' | 'reject'): Promise<any> {
-  return request<any>('/friends/respond', {
-    method: 'PUT',
-    body: JSON.stringify({ request_id, action })
-  });
-}
-
-// --- CHAT API ---
-export async function getChatMessages(isGroup: boolean, archive: boolean = false, receiverId?: string, params?: PaginationParams): Promise<PaginatedResponse<any>> {
-  const queryParams: any = { is_group: isGroup.toString(), archive: archive.toString(), ...params };
-  if (receiverId) {
-    queryParams.receiver_id = receiverId;
-  }
-  const query = new URLSearchParams(queryParams).toString();
-  return request<PaginatedResponse<any>>(`/chat?${query}`);
-}
-
-export async function sendChatMessage(content: string, isGroup: boolean, receiverId?: string): Promise<any> {
-  return request<any>('/chat', {
-    method: 'POST',
-    body: JSON.stringify({ content, is_group: isGroup, receiver_id: receiverId })
-  });
-}
-
-export async function deleteChatMessage(id: number): Promise<any> {
-  return request<any>(`/chat/${id}`, {
-    method: 'DELETE'
-  });
-}
-
-export async function restoreChatMessage(id: number): Promise<any> {
-  return request<any>(`/chat/${id}/restore`, {
-    method: 'PATCH'
-  });
-}
 export async function loginUser(data: any): Promise<any> {
   return request<any>('/auth/login', {
     method: 'POST',
@@ -557,11 +426,5 @@ export async function loginGoogle(token: string): Promise<any> {
   return request<any>('/auth/google-login', {
     method: 'POST',
     body: JSON.stringify({ token })
-  });
-}
-
-export async function generateContract(assignmentId: string): Promise<any> {
-  return request<any>(`/contracts/${assignmentId}/generate`, {
-    method: 'POST'
   });
 }

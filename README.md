@@ -13,7 +13,7 @@ Phiên bản này hợp nhất hai dự án thành **một ứng dụng, một A
 |---|---|---|
 | Admin | `admin` | `123456` |
 
-Database bàn giao được khởi tạo sạch: chưa có phòng, người thuê, hợp đồng, điện nước, hóa đơn, yêu cầu sửa chữa hay giao dịch.
+Database được tạo tự động ở lần chạy đầu tiên và chưa có phòng, người thuê, hợp đồng, điện nước, hóa đơn, yêu cầu sửa chữa hay giao dịch. Hãy đổi mật khẩu `admin` ngay sau khi đăng nhập lần đầu.
 
 ## 2. Khởi động nhanh trên Windows
 
@@ -90,12 +90,13 @@ RESET_DB_ON_START=true
 
 ## 5. Cấu hình `.env`
 
-Dự án đã có `.env` được cấu hình cho VietQR/SePay theo thông tin bàn giao và `.env.example` dùng làm mẫu. Chỉ điền các dịch vụ còn trống như Gemini hoặc Google Login:
+Sao chép `.env.example` thành `.env` rồi điền các giá trị của bạn. Không commit file `.env` lên GitHub:
 
 ```env
 PORT=5000
 JWT_SECRET=replace_with_a_long_random_secret
-VITE_API_URL=http://localhost:5000/api
+VITE_API_URL=/api
+CORS_ORIGINS=
 
 GOOGLE_CLIENT_ID=
 VITE_GOOGLE_CLIENT_ID=
@@ -145,7 +146,9 @@ Có thể dùng đường dẫn tương thích:
 https://<ten-mien-cloudflared>/api/payments/webhook
 ```
 
-Điền cùng giá trị vào `SEPAY_WEBHOOK_API_KEY` nếu webhook SePay của bạn gửi API key. Hệ thống có chống xử lý trùng giao dịch theo mã tham chiếu.
+Điền cùng giá trị vào `SEPAY_WEBHOOK_API_KEY`. Hệ thống có chống xử lý trùng giao dịch theo mã tham chiếu.
+
+Khi webhook không hoạt động (chưa có tunnel hoặc token SePay hết hạn), người thuê bấm **Tôi đã chuyển khoản** trên trang thanh toán; hóa đơn chuyển sang mục **Cần xác nhận** để Admin đối chiếu và xác nhận thủ công.
 
 ### Gemini chatbot
 
@@ -202,29 +205,7 @@ sequenceDiagram
 
 ## 8. Tài liệu API (API Documentation)
 
-Dưới đây là một số API RESTful cốt lõi của hệ thống. Để gọi các API này (trừ `/api/auth/login`), cần truyền token JWT trong Header: `Authorization: Bearer <token>`.
-
-### Auth
-- `POST /api/auth/login`: Đăng nhập (Admin hoặc Khách thuê). Body: `{ username, password }`.
-
-### Phòng trọ (Rooms)
-- `GET /api/rooms`: Lấy danh sách toàn bộ phòng và người thuê hiện tại.
-- `GET /api/rooms/:id`: Lấy chi tiết phòng và danh sách khách từng thuê.
-- `POST /api/rooms`: Tạo phòng mới (Chỉ Admin).
-
-### Khách thuê (Tenants)
-- `GET /api/tenants`: Lấy danh sách khách thuê.
-- `POST /api/tenants`: Thêm khách thuê mới.
-- `PUT /api/tenants/:id`: Cập nhật thông tin khách thuê (Đổi mật khẩu, hồ sơ).
-
-### Hóa đơn (Invoices)
-- `GET /api/invoices`: Lấy danh sách hóa đơn (Admin xem tất cả, Tenant xem hóa đơn của mình).
-- `POST /api/invoices`: Tạo hóa đơn điện nước/tiền phòng.
-- `PUT /api/invoices/:id`: Cập nhật hóa đơn (đổi trạng thái thanh toán).
-
-### Sửa chữa (Repairs)
-- `POST /api/repairs`: Khách thuê tạo yêu cầu sửa chữa.
-- `PUT /api/repairs/:id/status`: Admin cập nhật trạng thái xử lý sự cố.
+Danh sách đầy đủ các endpoint và quyền truy cập nằm trong [API.md](API.md). Đăng nhập qua `POST /api/auth/login`; server trả JWT trong cookie `httpOnly`. Có thể gửi token bằng header `Authorization: Bearer <token>`.
 
 ## 9. Code Quality & SonarQube
 <img width="1114" height="292" alt="image" src="https://github.com/user-attachments/assets/0425086c-ff1f-4871-94c7-d3f9ba44f530" />
@@ -233,15 +214,12 @@ Dưới đây là một số API RESTful cốt lõi của hệ thống. Để g�
 
 ## 10. Kiểm tra mã nguồn & Kiểm thử (Testing)
 
-Dự án đã được thiết lập đầy đủ các công cụ kiểm soát chất lượng (đáp ứng tiêu chuẩn SDLC cơ bản):
-
-1. **Unit Test (Jest + Supertest)**: 
-   Kiểm thử tự động cho các luồng xử lý API Backend (Tập trung vào tính năng cốt lõi).
+1. **API test (Jest + Supertest)**: kiểm tra phân quyền, nghiệp vụ, hóa đơn, webhook và chatbot trên database SQLite trong bộ nhớ. Lệnh coverage sẽ báo lỗi nếu độ phủ dòng dưới 70%.
    ```bash
-   npm run test:server -- --coverage
+   npm test
+   npm run test:coverage
    ```
-2. **Kiểm tra cú pháp (Linting)**: 
-   Sử dụng ESLint để đảm bảo chuẩn code.
+2. **Linting**:
    ```bash
    npm run lint
    ```
@@ -253,14 +231,21 @@ Dự án đã được thiết lập đầy đủ các công cụ kiểm soát c
 ## 11. Tích hợp liên tục (CI)
 
 Dự án đã được tích hợp **GitHub Actions** (`.github/workflows/ci.yml`). 
-Mỗi khi có code mới được Push hoặc Pull Request vào nhánh `main` và `develop`, GitHub sẽ tự động:
-- Cài đặt thư viện.
-- Chạy lệnh kiểm tra Linting.
-- Chạy toàn bộ Unit Tests bằng Jest.
+Mỗi khi có code mới được Push hoặc Pull Request vào `main` và `develop`, GitHub sẽ tự động cài thư viện, chạy lint, kiểm tra TypeScript, build và chạy toàn bộ test kèm coverage trên Node.js 22 và 24.
 
-## 12. Lưu ý triển khai
+## 12. Bảo mật
+
+- Mọi API nghiệp vụ đều yêu cầu đăng nhập; các thao tác quản trị chỉ dành cho Admin.
+- Người thuê chỉ đọc được hóa đơn, yêu cầu sửa chữa, hợp đồng và trang tổng quan của chính mình; `tenant_id` gửi từ trình duyệt không có tác dụng.
+- Mật khẩu được băm bằng bcrypt và không bao giờ được API trả về. Database cũ có mật khẩu dạng chữ thường sẽ tự được băm khi server khởi động.
+- Tài khoản mới do Admin cấp phải đổi mật khẩu ở lần đăng nhập đầu. Đổi hoặc reset mật khẩu, khóa hay thu hồi tài khoản sẽ kết thúc các phiên đang mở.
+- Socket.IO chỉ nhận kết nối đã đăng nhập; đăng nhập sai bị giới hạn 20 lần mỗi 15 phút; chatbot giới hạn 20 tin nhắn mỗi phút.
+
+## 13. Lưu ý triển khai
 
 - Không đẩy file `.env` chứa key thật lên GitHub.
-- Không công khai file SQLite khi có dữ liệu thật.
-- Đổi `JWT_SECRET` và mật khẩu Admin trước khi triển khai Internet.
+- Không công khai file SQLite khi có dữ liệu thật; `.gitignore` đã loại `*.sqlite` và `server/uploads/`.
+- Khi `NODE_ENV=production`, server sẽ không khởi động nếu thiếu `JWT_SECRET`, và cần khai báo domain frontend trong `CORS_ORIGINS`.
+- Đổi mật khẩu Admin trước khi triển khai Internet.
+- Luôn đặt `SEPAY_WEBHOOK_API_KEY`: nếu để trống, webhook sẽ chấp nhận mọi request.
 - Cloudflared URL miễn phí thường thay đổi sau mỗi lần chạy; phải cập nhật lại URL webhook trên SePay.
